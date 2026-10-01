@@ -132,6 +132,12 @@
   .cor-entrada { color: var(--entrada); }
   .cor-saida { color: var(--saida); }
 
+  /* Resumo falado */
+  .voz { background: var(--papel); border: 2px solid var(--linha); border-radius: 14px; padding: 1.1rem 1.25rem; display: grid; gap: 0.8rem; }
+  .aviso-abrir { border-left: 5px solid var(--tinta); padding-left: 0.6rem; font-weight: 700; }
+  .resumo-texto:empty { display: none; }
+  .resumo-texto { border: 2px dashed var(--linha); border-radius: 10px; padding: 0.7rem 0.9rem; }
+
   /* Formulário */
   form {
     background: var(--papel);
@@ -226,6 +232,14 @@
       <li>Entradas: <strong class="cor-entrada" id="total-entradas">R$ 0,00</strong></li>
       <li>Saídas: <strong class="cor-saida" id="total-saidas">R$ 0,00</strong></li>
     </ul>
+  </section>
+
+  <section class="voz" aria-labelledby="titulo-voz">
+    <h2 id="titulo-voz">Resumo do mês</h2>
+    <p class="aviso-abrir" id="aviso-abrir" hidden></p>
+    <button type="button" class="btn" id="resumir">Ouvir o resumo do mês</button>
+    <p class="resumo-texto" id="resumo-texto"></p>
+    <label class="opcao"><input type="checkbox" id="avisar-ao-abrir" checked> Avisar sobre contas ao abrir o app</label>
   </section>
 
   <form id="novo" novalidate aria-labelledby="titulo-novo">
@@ -325,7 +339,7 @@
   }
 
   // ---------- Preferências de leitura (só neste navegador) ----------
-  let prefs = { texto: 100, contraste: false };
+  let prefs = { texto: 100, contraste: false, avisoAbrir: true };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem('cp-prefs') || '{}') }; } catch (e) {}
   function salvarPrefs() {
     try { localStorage.setItem('cp-prefs', JSON.stringify(prefs)); } catch (e) {}
@@ -334,6 +348,7 @@
     document.documentElement.style.fontSize = prefs.texto + '%';
     document.documentElement.classList.toggle('hc', !!prefs.contraste);
     $('contraste').setAttribute('aria-pressed', String(!!prefs.contraste));
+    $('avisar-ao-abrir').checked = prefs.avisoAbrir !== false;
   }
   function mudarTexto(dir) {
     const i = TAMANHOS.indexOf(prefs.texto);
@@ -442,6 +457,8 @@
     $('titulo-saldo').textContent = `Saldo de ${nomeMes()}`;
     $('titulo-lista').textContent = `Lançamentos de ${nomeMes()}`;
     $('mes-atual').hidden = mes === hoje().slice(0, 7);
+    if ($('resumo-texto').dataset.mes !== mes) $('resumo-texto').textContent = '';
+    if (carregado) avisarAoAbrir();
     // Sugestões de categoria: as já usadas
     const usadas = [...new Set(itens.map((i) => i.categoria && String(i.categoria).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
     $('categorias').replaceChildren(...usadas.map((c) => { const o = document.createElement('option'); o.value = c; return o; }));
@@ -630,23 +647,125 @@
     $('mes-proximo').focus();
   });
 
-  // ---------- Ouvir o saldo em voz alta ----------
+  // ---------- Voz ----------
   const voz = 'speechSynthesis' in window ? window.speechSynthesis : null;
+  function falar(frase) {
+    const u = new SpeechSynthesisUtterance(frase);
+    u.lang = 'pt-BR';
+    const pt = voz.getVoices().find((v) => /^pt[-_]BR/i.test(v.lang)) || voz.getVoices().find((v) => /^pt/i.test(v.lang));
+    if (pt) u.voice = pt;
+    voz.cancel();
+    voz.speak(u);
+  }
+  const saldoFalado = (v) => `${v < 0 ? 'negativo, menos ' : ''}${valorFalado(v)}`;
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+  function fraseSaldo() {
+    const t = totais();
+    return !itensDoMes().length ? `Você não tem lançamentos em ${nomeMes()}.`
+      : `Saldo de ${nomeMes()}: ${saldoFalado(t.saldo)}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}.`;
+  }
+
+  // Resumo do mês: entradas, saídas, saldo e os 3 maiores gastos por categoria
+  function fraseResumo() {
+    const doMes = itensDoMes();
+    if (!doMes.length) return `Resumo de ${nomeMes()}: nenhum lançamento neste mês.`;
+    const t = totais(doMes);
+    const porCategoria = new Map();
+    doMes.filter((i) => i.tipo !== 'entrada').forEach((i) => {
+      const c = categoriaDe(i);
+      porCategoria.set(c, Math.round(((porCategoria.get(c) || 0) + i.valor) * 100) / 100);
+    });
+    const maiores = [...porCategoria].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    let f = `Resumo de ${nomeMes()}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}. Saldo: ${saldoFalado(t.saldo)}.`;
+    f += maiores.length
+      ? ` ${maiores.length === 1 ? 'Maior gasto' : `${maiores.length} maiores gastos`} por categoria: ${maiores.map(([c, v], k) => `${k + 1}º, ${c}, ${valorFalado(v)}`).join('; ')}.`
+      : ' Nenhuma saída neste mês.';
+    return f;
+  }
+
+  // O resumo também fica escrito na tela. Sem síntese de voz, o leitor de tela lê pelo aviso.
+  $('resumir').addEventListener('click', () => {
+    if (voz && voz.speaking) { voz.cancel(); return anunciar('Fala interrompida.'); }
+    const f = fraseResumo();
+    $('resumo-texto').textContent = f;
+    $('resumo-texto').dataset.mes = mes;
+    if (voz) falar(f); else anunciar(f);
+  });
+
   if (voz) {
     $('ouvir').hidden = false;
     $('ouvir').addEventListener('click', () => {
       if (voz.speaking) { voz.cancel(); return; }
-      const t = totais();
-      const frase = !itensDoMes().length ? `Você não tem lançamentos em ${nomeMes()}.`
-        : `Saldo de ${nomeMes()}: ${t.saldo < 0 ? 'negativo, menos ' : ''}${valorFalado(t.saldo)}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}.`;
-      const u = new SpeechSynthesisUtterance(frase);
-      u.lang = 'pt-BR';
-      const pt = voz.getVoices().find((v) => /^pt[-_]BR/i.test(v.lang)) || voz.getVoices().find((v) => /^pt/i.test(v.lang));
-      if (pt) u.voice = pt;
-      voz.cancel();
-      voz.speak(u);
+      falar(fraseSaldo());
     });
   }
+
+  // ---------- Aviso ao abrir: contas atrasadas e próximas ----------
+  // Preenchido na etapa de contas; sem contas cadastradas não há o que avisar.
+  let contas = [];
+  const diasNoMes = (m) => { const [a, n] = m.split('-').map(Number); return new Date(a, n, 0).getDate(); };
+  const diaDoVencimento = (c, m) => Math.min(c.dia, diasNoMes(m));
+  const foiPaga = (c, m) => !!(c.pagas && c.pagas[m]);
+  const somarMeses = (m, d) => { const [a, n] = m.split('-').map(Number); const x = new Date(a, n - 1 + d, 1); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}`; };
+  const diasEntre = (isoA, isoB) => Math.round((Date.parse(isoB + 'T12:00:00') - Date.parse(isoA + 'T12:00:00')) / 86400000);
+  const JANELA_DIAS = 7;
+
+  function contasPendentes() {
+    const hojeIso = hoje();
+    const atual = hojeIso.slice(0, 7);
+    const atrasadas = [], proximas = [];
+    contas.forEach((c) => {
+      const criada = c.criado ? new Date(c.criado) : null;
+      const inicio = criada ? `${criada.getFullYear()}-${pad(criada.getMonth() + 1)}` : '0000-00';
+      [somarMeses(atual, -1), atual, somarMeses(atual, 1)].forEach((m) => {
+        if (m < inicio && m !== atual) return;
+        if (foiPaga(c, m)) return;
+        const iso = `${m}-${pad(diaDoVencimento(c, m))}`;
+        const dias = diasEntre(hojeIso, iso);
+        if (dias < 0 && m <= atual) atrasadas.push({ c, iso, dias });
+        else if (dias >= 0 && dias <= JANELA_DIAS) proximas.push({ c, iso, dias });
+      });
+    });
+    const porData = (a, b) => a.iso.localeCompare(b.iso);
+    return { atrasadas: atrasadas.sort(porData), proximas: proximas.sort(porData) };
+  }
+  const quando = (dias) => dias === 0 ? 'vence hoje' : dias === 1 ? 'vence amanhã' : `vence em ${dias} dias`;
+
+  function fraseAviso() {
+    const { atrasadas, proximas } = contasPendentes();
+    if (!atrasadas.length && !proximas.length) return '';
+    const partes = [];
+    if (atrasadas.length) {
+      partes.push(`${plural(atrasadas.length, 'conta atrasada', 'contas atrasadas')}: ` +
+        atrasadas.map(({ c, iso }) => `${c.descricao}, ${valorFalado(c.valor)}, venceu em ${dataLonga(iso)}`).join('; ') + '.');
+    }
+    if (proximas.length) {
+      partes.push(`${plural(proximas.length, 'conta próxima', 'contas próximas')}: ` +
+        proximas.map(({ c, dias }) => `${c.descricao}, ${valorFalado(c.valor)}, ${quando(dias)}`).join('; ') + '.');
+    }
+    return 'Atenção. ' + partes.join(' ');
+  }
+
+  let avisoFeito = false;
+  function avisarAoAbrir() {
+    if (avisoFeito || !carregado) return;
+    avisoFeito = true;
+    const el = $('aviso-abrir');
+    const f = prefs.avisoAbrir === false ? '' : fraseAviso();
+    el.hidden = !f;
+    el.textContent = f;
+    if (!f) return;
+    anunciar(f);
+    // Navegadores só deixam falar sem clique se a pessoa já interagiu com a página
+    if (voz && navigator.userActivation && navigator.userActivation.hasBeenActive) falar(f);
+  }
+  $('avisar-ao-abrir').addEventListener('change', (e) => {
+    prefs.avisoAbrir = e.target.checked;
+    salvarPrefs();
+    anunciar(prefs.avisoAbrir ? 'Aviso de contas ao abrir: ligado.' : 'Aviso de contas ao abrir: desligado.');
+    if (!prefs.avisoAbrir) { $('aviso-abrir').hidden = true; if (voz) voz.cancel(); }
+  });
 
   $('pular').addEventListener('click', (e) => {
     e.preventDefault();
