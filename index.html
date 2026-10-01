@@ -169,6 +169,12 @@
   .erro { color: var(--saida); font-weight: 700; border-left: 5px solid var(--saida); padding-left: 0.6rem; }
   .erro:empty { display: none; }
 
+  .exportar { display: grid; gap: 0.5rem; margin-top: 1rem; }
+  .item-atrasada { border-left-color: var(--saida); }
+  .item-situacao { font-weight: 700; }
+  .item-atrasada .item-situacao { color: var(--saida); }
+  #lista-contas:empty { display: none; }
+
   /* Lista */
   .lista-topo { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
   .salvo-em { color: var(--tinta-2); font-size: 0.95rem; }
@@ -286,6 +292,37 @@
       <li class="vazio">Carregando seus lançamentos…</li>
     </ul>
   </section>
+
+  <section aria-labelledby="titulo-contas" id="contas-secao">
+    <h2 id="titulo-contas" tabindex="-1">Contas a vencer</h2>
+    <form id="nova-conta" novalidate aria-labelledby="titulo-nova-conta">
+      <h3 id="titulo-nova-conta">Nova conta que se repete todo mês</h3>
+      <div class="campo">
+        <label for="c-descricao">Descrição da conta</label>
+        <input type="text" id="c-descricao" maxlength="80" autocomplete="off" required aria-describedby="erro-c-descricao">
+        <p class="erro" id="erro-c-descricao"></p>
+      </div>
+      <div class="campo">
+        <label for="c-valor">Valor em reais</label>
+        <p class="dica" id="dica-c-valor">Use vírgula para os centavos. Exemplo: 650,90</p>
+        <input type="text" id="c-valor" inputmode="decimal" autocomplete="off" required aria-describedby="dica-c-valor erro-c-valor">
+        <p class="erro" id="erro-c-valor"></p>
+      </div>
+      <div class="campo">
+        <label for="c-dia">Dia do vencimento</label>
+        <p class="dica" id="dica-c-dia">Um número de 1 a 31. Em meses mais curtos, vale o último dia do mês.</p>
+        <input type="text" id="c-dia" inputmode="numeric" maxlength="2" autocomplete="off" required aria-describedby="dica-c-dia erro-c-dia">
+        <p class="erro" id="erro-c-dia"></p>
+      </div>
+      <button type="submit" class="btn btn-principal">Adicionar conta</button>
+    </form>
+    <p class="salvo-em" id="contas-resumo"></p>
+    <ul class="lista" id="lista-contas"></ul>
+    <div class="exportar">
+      <button type="button" class="btn" id="exportar">Exportar contas para a agenda (.ics)</button>
+      <p class="dica" id="dica-exportar">Gera o arquivo contas-a-vencer.ics, com um evento mensal por conta e um lembrete um dia antes. Cada conta tem um código fixo: agendas que reconhecem esse código atualizam o evento ao importar de novo, em vez de repetir. O arquivo é uma cópia de hoje: contas excluídas ou marcadas como pagas aqui não mudam na agenda sozinhas. O lembrete depende do aplicativo da agenda.</p>
+    </div>
+  </section>
 </main>
 
 <div class="sr" id="aviso" aria-live="polite" aria-atomic="true"></div>
@@ -381,8 +418,11 @@
   function gravarLocal() {
     try { localStorage.setItem(CHAVE_LOCAL, JSON.stringify(itens)); return true; } catch (e) { return false; }
   }
+  // Contas recorrentes: neste navegador ficam em outra chave; na conta da pessoa, na mesma coleção com tipo "conta"
+  const CHAVE_CONTAS = 'cp-contas';
   function usarLocal() {
     itens = lerLocal();
+    try { const v = JSON.parse(localStorage.getItem(CHAVE_CONTAS) || '[]'); contas = Array.isArray(v) ? v : []; } catch (e) { contas = []; }
     carregado = true;
     $('salvo-em').textContent = 'Salvo só neste navegador.';
     desenhar();
@@ -396,7 +436,9 @@
     colecao = db.collection('data/users/' + id);
     $('salvo-em').textContent = 'Salvo na sua conta. Só você vê.';
     colecao.onSnapshot((snap) => {
-      itens = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      itens = todos.filter((d) => d.tipo !== 'conta');
+      contas = todos.filter((d) => d.tipo === 'conta');
       carregado = true;
       desenhar();
     }, () => {
@@ -422,6 +464,27 @@
     } else {
       itens = itens.filter((i) => i.id !== id);
       gravarLocal();
+      desenhar();
+    }
+  }
+
+  async function salvarConta(conta) {
+    if (colecao) {
+      const { id, ...corpo } = conta;
+      await colecao.doc(id).set(corpo);
+    } else {
+      const i = contas.findIndex((c) => c.id === conta.id);
+      if (i === -1) contas.push(conta); else contas[i] = conta;
+      try { localStorage.setItem(CHAVE_CONTAS, JSON.stringify(contas)); } catch (e) { throw new Error('local'); }
+      desenhar();
+    }
+  }
+  async function removerConta(id) {
+    if (colecao) {
+      await colecao.doc(id).delete();
+    } else {
+      contas = contas.filter((c) => c.id !== id);
+      try { localStorage.setItem(CHAVE_CONTAS, JSON.stringify(contas)); } catch (e) {}
       desenhar();
     }
   }
@@ -458,6 +521,7 @@
     $('titulo-lista').textContent = `Lançamentos de ${nomeMes()}`;
     $('mes-atual').hidden = mes === hoje().slice(0, 7);
     if ($('resumo-texto').dataset.mes !== mes) $('resumo-texto').textContent = '';
+    desenharContas();
     if (carregado) avisarAoAbrir();
     // Sugestões de categoria: as já usadas
     const usadas = [...new Set(itens.map((i) => i.categoria && String(i.categoria).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -558,7 +622,7 @@
     if (acao === 'excluir') {
       confirmando = id;
       desenhar();
-      focar(id, 'confirmar');
+      focar(id, 'cancelar');
       anunciar(`Confirme: excluir ${item.descricao}?`);
     } else if (acao === 'cancelar') {
       confirmando = null;
@@ -710,16 +774,19 @@
   const somarMeses = (m, d) => { const [a, n] = m.split('-').map(Number); const x = new Date(a, n - 1 + d, 1); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}`; };
   const diasEntre = (isoA, isoB) => Math.round((Date.parse(isoB + 'T12:00:00') - Date.parse(isoA + 'T12:00:00')) / 86400000);
   const JANELA_DIAS = 7;
+  // Primeiro mês em que a conta existe (o do cadastro)
+  function mesInicial(c) {
+    const d = c.criado ? new Date(c.criado) : null;
+    return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}` : '0000-00';
+  }
 
   function contasPendentes() {
     const hojeIso = hoje();
     const atual = hojeIso.slice(0, 7);
     const atrasadas = [], proximas = [];
     contas.forEach((c) => {
-      const criada = c.criado ? new Date(c.criado) : null;
-      const inicio = criada ? `${criada.getFullYear()}-${pad(criada.getMonth() + 1)}` : '0000-00';
       [somarMeses(atual, -1), atual, somarMeses(atual, 1)].forEach((m) => {
-        if (m < inicio && m !== atual) return;
+        if (m < mesInicial(c) && m !== atual) return;
         if (foiPaga(c, m)) return;
         const iso = `${m}-${pad(diaDoVencimento(c, m))}`;
         const dias = diasEntre(hojeIso, iso);
@@ -756,15 +823,245 @@
     el.hidden = !f;
     el.textContent = f;
     if (!f) return;
-    anunciar(f);
-    // Navegadores só deixam falar sem clique se a pessoa já interagiu com a página
+    // Navegadores só deixam falar sem clique se a pessoa já interagiu com a página.
+    // Quando fala, não anuncia também no aria-live, para o leitor de tela não repetir.
     if (voz && navigator.userActivation && navigator.userActivation.hasBeenActive) falar(f);
+    else anunciar(f);
   }
   $('avisar-ao-abrir').addEventListener('change', (e) => {
     prefs.avisoAbrir = e.target.checked;
     salvarPrefs();
     anunciar(prefs.avisoAbrir ? 'Aviso de contas ao abrir: ligado.' : 'Aviso de contas ao abrir: desligado.');
     if (!prefs.avisoAbrir) { $('aviso-abrir').hidden = true; if (voz) voz.cancel(); }
+  });
+
+  // ---------- Contas a vencer ----------
+  function situacaoConta(c, m) {
+    const iso = `${m}-${pad(diaDoVencimento(c, m))}`;
+    if (foiPaga(c, m)) return { iso, texto: 'Paga', atrasada: false, paga: true };
+    const dias = diasEntre(hoje(), iso);
+    if (dias < 0) return { iso, texto: `Atrasada, venceu em ${dataLonga(iso)}`, atrasada: true };
+    if (dias <= 1) return { iso, texto: dias === 0 ? 'Vence hoje' : 'Vence amanhã', atrasada: false };
+    return { iso, texto: `A pagar até ${dataLonga(iso)}`, atrasada: false };
+  }
+
+  let confirmandoConta = null;
+  function desenharContas() {
+    const ul = $('lista-contas');
+    ul.textContent = '';
+    if (!carregado) return;
+    const doMes = contas.filter((c) => mes >= mesInicial(c)).sort((a, b) => diaDoVencimento(a, mes) - diaDoVencimento(b, mes) || a.descricao.localeCompare(b.descricao, 'pt-BR'));
+    const pagas = doMes.filter((c) => foiPaga(c, mes)).length;
+    $('contas-resumo').textContent = !contas.length ? 'Nenhuma conta cadastrada ainda.'
+      : !doMes.length ? `Nenhuma conta em ${nomeMes()}.`
+      : `Em ${nomeMes()}: ${plural(doMes.length, 'conta', 'contas')}, ${pagas} ${pagas === 1 ? 'paga' : 'pagas'}.`;
+    $('exportar').disabled = !contas.length;
+    doMes.forEach((c) => ul.appendChild(linhaConta(c)));
+  }
+
+  function linhaConta(c) {
+    const s = situacaoConta(c, mes);
+    const li = document.createElement('li');
+    li.className = 'item item-conta' + (s.atrasada ? ' item-atrasada' : '');
+    li.dataset.id = c.id;
+
+    const texto = document.createElement('div');
+    const h3 = document.createElement('h3');
+    h3.textContent = c.descricao;
+    const meta = document.createElement('p');
+    meta.className = 'item-meta';
+    meta.append(`Vence todo dia ${c.dia}. Situação: `);
+    const sit = document.createElement('span');
+    sit.className = 'item-situacao';
+    sit.textContent = s.texto;
+    meta.append(sit, '.');
+    texto.append(h3, meta);
+
+    const valor = document.createElement('p');
+    valor.className = 'item-valor';
+    valor.textContent = dinheiro(c.valor);
+
+    const nome = `${c.descricao}, ${dinheiro(c.valor)}, ${nomeMes()}`;
+    const acoes = document.createElement('div');
+    acoes.className = 'item-acoes';
+    const pagar = botao(s.paga ? 'Desfazer pagamento' : 'Marcar como paga', 'btn', `: ${nome}`);
+    pagar.dataset.acao = 'pagar';
+    acoes.append(pagar);
+    if (confirmandoConta === c.id) {
+      const pergunta = document.createElement('p');
+      pergunta.textContent = 'Excluir esta conta?';
+      const sim = botao('Sim, excluir', 'btn btn-perigo', `: ${c.descricao}`);
+      sim.dataset.acao = 'confirmar';
+      const nao = botao('Cancelar', 'btn');
+      nao.dataset.acao = 'cancelar';
+      acoes.append(pergunta, sim, nao);
+    } else {
+      const excluir = botao('Excluir', 'btn btn-perigo', `: ${c.descricao}`);
+      excluir.dataset.acao = 'excluir';
+      acoes.append(excluir);
+    }
+    li.append(texto, valor, acoes);
+    return li;
+  }
+
+  function focarConta(id, acao) {
+    const b = document.querySelector(`#lista-contas .item[data-id="${CSS.escape(id)}"] [data-acao="${acao}"]`);
+    if (b) b.focus();
+  }
+
+  $('lista-contas').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-acao]');
+    if (!b) return;
+    const li = b.closest('.item');
+    const id = li.dataset.id;
+    const conta = contas.find((x) => x.id === id);
+    if (!conta) return;
+    const acao = b.dataset.acao;
+    if (acao === 'pagar') {
+      const pagas = { ...(conta.pagas || {}) };
+      const agora = !pagas[mes];
+      if (agora) pagas[mes] = true; else delete pagas[mes];
+      try {
+        await salvarConta({ ...conta, pagas });
+      } catch (err) {
+        return anunciar('Não foi possível salvar agora. Tente de novo.', true);
+      }
+      setTimeout(() => focarConta(id, 'pagar'), 50);
+      anunciar(agora ? `${conta.descricao} marcada como paga em ${nomeMes()}.` : `Pagamento de ${conta.descricao} desfeito em ${nomeMes()}.`);
+    } else if (acao === 'excluir') {
+      confirmandoConta = id;
+      desenhar();
+      focarConta(id, 'cancelar');
+      anunciar(`Confirme: excluir a conta ${conta.descricao}?`);
+    } else if (acao === 'cancelar') {
+      confirmandoConta = null;
+      desenhar();
+      focarConta(id, 'excluir');
+      anunciar('Exclusão cancelada.');
+    } else if (acao === 'confirmar') {
+      const vizinho = li.nextElementSibling || li.previousElementSibling;
+      const idVizinho = vizinho && vizinho.dataset.id;
+      confirmandoConta = null;
+      try {
+        await removerConta(id);
+      } catch (err) {
+        desenhar();
+        return anunciar('Não foi possível excluir agora. Tente de novo.', true);
+      }
+      setTimeout(() => {
+        if (idVizinho && document.querySelector(`#lista-contas .item[data-id="${CSS.escape(idVizinho)}"]`)) focarConta(idVizinho, 'excluir');
+        else $('titulo-contas').focus();
+      }, 50);
+      anunciar(`Conta ${conta.descricao} excluída.`);
+    }
+  });
+
+  ['c-descricao', 'c-valor', 'c-dia'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+  $('nova-conta').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    ['c-descricao', 'c-valor', 'c-dia'].forEach(limparErro);
+    const descricao = $('c-descricao').value.trim();
+    const valor = lerValor($('c-valor').value);
+    const diaTexto = $('c-dia').value.trim();
+    const dia = /^\d{1,2}$/.test(diaTexto) ? Number(diaTexto) : NaN;
+    if (!descricao) erro('c-descricao', 'escreva o nome da conta, por exemplo: Aluguel.');
+    if (valor === null) erro('c-valor', 'digite o valor em números, por exemplo: 650,90.');
+    else if (valor <= 0) erro('c-valor', 'o valor precisa ser maior que zero.');
+    if (!(dia >= 1 && dia <= 31)) erro('c-dia', 'digite um dia de 1 a 31, por exemplo: 10.');
+    const invalido = document.querySelector('#nova-conta [aria-invalid="true"]');
+    if (invalido) {
+      anunciar('Não foi possível adicionar a conta. Corrija o campo indicado.', true);
+      setTimeout(() => invalido.focus(), 50);
+      return;
+    }
+    if (!carregado) return anunciar('Aguarde, seus dados ainda estão carregando.', true);
+    const id = novoId();
+    // O UID nunca muda: é ele que faz a agenda atualizar o evento em vez de duplicar
+    const uid = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : id + Math.random().toString(16).slice(2)) + '@controle-pessoal';
+    try {
+      await salvarConta({ id, tipo: 'conta', descricao, valor, dia, uid, pagas: {}, criado: Date.now() });
+    } catch (err) {
+      return anunciar('Não foi possível salvar agora. Tente de novo.', true);
+    }
+    ['c-descricao', 'c-valor', 'c-dia'].forEach((c) => { $(c).value = ''; });
+    $('c-descricao').focus();
+    anunciar(`Conta adicionada: ${descricao}, ${dinheiro(valor)}, vence todo dia ${dia}.`);
+  });
+
+  // ---------- Exportar para a agenda (.ics, RFC 5545) ----------
+  const icsTexto = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  // Linhas de até 75 bytes, continuadas com espaço; sem cortar no meio de um caractere
+  function icsDobrar(linha) {
+    const enc = new TextEncoder();
+    const out = [];
+    let atual = '', bytes = 0, limite = 75;
+    for (const ch of linha) {
+      const n = enc.encode(ch).length;
+      if (bytes + n > limite) { out.push(atual); atual = ' '; bytes = 1; limite = 75; }
+      atual += ch; bytes += n;
+    }
+    out.push(atual);
+    return out.join('\r\n');
+  }
+  const icsData = (iso) => iso.replace(/-/g, '');
+  const icsAgora = () => new Date().toISOString().replace(/[-:]|\.\d{3}/g, '');
+
+  function gerarICS() {
+    const agora = icsAgora();
+    const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Controle Pessoal//Contas a vencer//PT-BR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Contas a vencer'];
+    contas.forEach((c) => {
+      // Primeiro vencimento: o do mês do cadastro, ou o do mês seguinte se o dia já tinha passado.
+      // Depende só dos dados da conta, então não muda de uma exportação para a outra.
+      const cad = new Date(c.criado || Date.now());
+      const iso0 = `${cad.getFullYear()}-${pad(cad.getMonth() + 1)}-${pad(cad.getDate())}`;
+      let m = iso0.slice(0, 7);
+      if (`${m}-${pad(diaDoVencimento(c, m))}` < iso0) m = somarMeses(m, 1);
+      const inicio = `${m}-${pad(diaDoVencimento(c, m))}`;
+      const fim = new Date(Date.parse(inicio + 'T12:00:00') + 86400000);
+      const fimIso = `${fim.getFullYear()}-${pad(fim.getMonth() + 1)}-${pad(fim.getDate())}`;
+      // Dias 29 a 31: pega o último dia existente do mês, até o dia escolhido
+      const regra = c.dia >= 29
+        ? `FREQ=MONTHLY;BYMONTHDAY=${Array.from({ length: c.dia - 27 }, (_, k) => 28 + k).join(',')};BYSETPOS=-1`
+        : `FREQ=MONTHLY;BYMONTHDAY=${c.dia}`;
+      L.push(
+        'BEGIN:VEVENT',
+        `UID:${c.uid || c.id + '@controle-pessoal'}`,
+        `DTSTAMP:${agora}`,
+        'SEQUENCE:0',
+        `SUMMARY:${icsTexto('Pagar ' + c.descricao)}`,
+        `DESCRIPTION:${icsTexto(`Conta de ${dinheiro(c.valor)}, vence todo dia ${c.dia}.`)}`,
+        `DTSTART;VALUE=DATE:${icsData(inicio)}`,
+        `DTEND;VALUE=DATE:${icsData(fimIso)}`,
+        `RRULE:${regra}`,
+        'TRANSP:TRANSPARENT',
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${icsTexto('Amanhã vence: ' + c.descricao)}`,
+        'TRIGGER:-P1D',
+        'END:VALARM',
+        'END:VEVENT'
+      );
+    });
+    L.push('END:VCALENDAR');
+    return L.map(icsDobrar).join('\r\n') + '\r\n';
+  }
+
+  $('exportar').addEventListener('click', () => {
+    if (!contas.length) return anunciar('Cadastre uma conta antes de exportar.', true);
+    try {
+      const blob = new Blob([gerarICS()], { type: 'text/calendar;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'contas-a-vencer.ics';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      anunciar(`Arquivo contas-a-vencer.ics gerado com ${plural(contas.length, 'conta', 'contas')}. Abra o arquivo para importar na sua agenda.`);
+    } catch (err) {
+      anunciar('Não foi possível gerar o arquivo agora.', true);
+    }
   });
 
   $('pular').addEventListener('click', (e) => {
