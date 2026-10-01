@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Controle financeiro pessoal simples e acessível para pessoas com deficiência visual.">
+<title>Controle Pessoal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<script>
+  // Preferências de leitura (só deste navegador): aplicadas antes de desenhar
+  try {
+    var p = JSON.parse(localStorage.getItem('cp-prefs') || '{}');
+    if (p.texto) document.documentElement.style.fontSize = p.texto + '%';
+    if (p.contraste) document.documentElement.classList.add('hc');
+  } catch (e) {}
+</script>
+<style>
+  /* Uma coluna estreita, como um caderno de contas: saldo, formulário, lista */
+  :root {
+    --fundo: #f5f7f3;
+    --papel: #ffffff;
+    --tinta: #121a15;
+    --tinta-2: #3a4a40;
+    --linha: #6b7a70;
+    --marca: #0b6b3a;
+    --sobre-marca: #ffffff;
+    --entrada: #0b6b3a;
+    --saida: #b42318;
+    --foco: #1747d1;
+    --halo: #ffffff;
+    --fonte: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fundo: #0f1411; --papel: #18201b; --tinta: #f2f5f1; --tinta-2: #c8d3cb; --linha: #8a998f;
+      --marca: #5fd48f; --sobre-marca: #06180d; --entrada: #6fe09d; --saida: #ffa094;
+      --foco: #ffd23f; --halo: #000000; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fundo: #0f1411; --papel: #18201b; --tinta: #f2f5f1; --tinta-2: #c8d3cb; --linha: #8a998f;
+    --marca: #5fd48f; --sobre-marca: #06180d; --entrada: #6fe09d; --saida: #ffa094;
+    --foco: #ffd23f; --halo: #000000; color-scheme: dark;
+  }
+  /* Alto contraste: vale em qualquer tema */
+  html:root.hc {
+    --fundo: #000000; --papel: #000000; --tinta: #ffffff; --tinta-2: #ffffff; --linha: #ffffff;
+    --marca: #ffff00; --sobre-marca: #000000; --entrada: #7dff9e; --saida: #ff9d9d;
+    --foco: #00ffff; --halo: #000000; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--fundo);
+    color: var(--tinta);
+    font-family: var(--fonte);
+    font-size: 1.125rem;
+    line-height: 1.55;
+  }
+  .pagina {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 1.25rem 3rem;
+    display: grid;
+    gap: 1.25rem;
+  }
+  h1, h2, h3, p { margin: 0; text-wrap: balance; overflow-wrap: break-word; }
+  h1 { font-size: 1.9rem; line-height: 1.15; }
+  h2 { font-size: 1.35rem; }
+  h3 { font-size: 1.1rem; }
+
+  .sr {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .pular {
+    position: absolute; left: 16px; top: -10rem; z-index: 10;
+    background: var(--marca); color: var(--sobre-marca); font-weight: 700;
+    padding: 0.7rem 1rem; border-radius: 8px;
+  }
+  .pular:focus { top: 1rem; }
+
+  :focus { outline: none; }
+  :focus-visible {
+    outline: 4px solid var(--foco);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 8px var(--halo);
+    border-radius: 6px;
+  }
+  main:focus-visible { outline: none; box-shadow: none; }
+
+  /* Topo */
+  .topo { display: grid; gap: 0.75rem; }
+  .leitura { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+    min-height: 2.9rem; padding: 0.5rem 1rem;
+    font: inherit; font-weight: 700; line-height: 1.2;
+    color: var(--tinta); background: var(--papel);
+    border: 2px solid var(--tinta); border-radius: 10px; cursor: pointer;
+  }
+  .btn:hover { text-decoration: underline; }
+  .btn[aria-pressed="true"] { background: var(--tinta); color: var(--fundo); }
+  .btn-principal { background: var(--marca); color: var(--sobre-marca); border-color: var(--marca); width: 100%; font-size: 1.15rem; }
+  .btn-perigo { color: var(--saida); border-color: var(--saida); }
+
+  /* Saldo */
+  .saldo {
+    background: var(--papel);
+    border: 2px solid var(--linha);
+    border-radius: 14px;
+    padding: 1.1rem 1.25rem;
+    display: grid;
+    gap: 0.6rem;
+  }
+  .saldo-rotulo { font-weight: 700; color: var(--tinta-2); }
+  .saldo-valor { font-size: 2.3rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .saldo-estado { font-weight: 700; }
+  .totais { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; }
+  .totais li { font-variant-numeric: tabular-nums; }
+  .totais strong { font-weight: 700; }
+  .cor-entrada { color: var(--entrada); }
+  .cor-saida { color: var(--saida); }
+
+  /* Formulário */
+  form {
+    background: var(--papel);
+    border: 2px solid var(--linha);
+    border-radius: 14px;
+    padding: 1.1rem 1.25rem;
+    display: grid;
+    gap: 1rem;
+  }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-weight: 700; padding: 0; margin-bottom: 0.4rem; }
+  .opcoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); gap: 0.5rem; }
+  .opcao {
+    display: flex; align-items: center; gap: 0.7rem;
+    min-height: 3rem; padding: 0.5rem 0.9rem;
+    border: 2px solid var(--linha); border-radius: 10px; cursor: pointer;
+  }
+  .opcao:has(input:checked) { border: 3px solid var(--tinta); font-weight: 700; }
+  .opcao input { width: 1.4rem; height: 1.4rem; margin: 0; accent-color: var(--marca); }
+  .campo { display: grid; gap: 0.3rem; }
+  .campo label { font-weight: 700; }
+  .dica { color: var(--tinta-2); font-size: 0.95rem; }
+  input[type="text"] {
+    width: 100%; min-height: 3rem; padding: 0.5rem 0.75rem;
+    font: inherit; color: var(--tinta); background: var(--fundo);
+    border: 2px solid var(--tinta); border-radius: 8px;
+  }
+  input[aria-invalid="true"] { border: 3px solid var(--saida); }
+  .erro { color: var(--saida); font-weight: 700; border-left: 5px solid var(--saida); padding-left: 0.6rem; }
+  .erro:empty { display: none; }
+
+  /* Lista */
+  .lista-topo { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  .salvo-em { color: var(--tinta-2); font-size: 0.95rem; }
+  .lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+  .item {
+    background: var(--papel);
+    border: 2px solid var(--linha);
+    border-left-width: 8px;
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.3rem 1rem;
+    align-items: start;
+  }
+  .item-entrada { border-left-color: var(--entrada); }
+  .item-saida { border-left-color: var(--saida); }
+  .item-meta { color: var(--tinta-2); }
+  .etiqueta { font-weight: 700; }
+  .item-entrada .etiqueta, .item-entrada .item-valor { color: var(--entrada); }
+  .item-saida .etiqueta, .item-saida .item-valor { color: var(--saida); }
+  .item-valor { font-weight: 700; font-size: 1.2rem; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .item-acoes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .vazio { border: 2px dashed var(--linha); border-radius: 12px; padding: 1.2rem; color: var(--tinta-2); }
+
+  @media (max-width: 30rem) {
+    .item { grid-template-columns: minmax(0, 1fr); }
+    .item-valor { text-align: left; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @media (forced-colors: active) { .btn, .opcao, .item { border: 2px solid CanvasText; } }
+</style>
+</head>
+<body>
+
+<a class="pular" href="#novo" id="pular">Pular para adicionar um lançamento</a>
+
+<main class="pagina" id="conteudo" tabindex="-1">
+  <header class="topo">
+    <h1>Controle Pessoal</h1>
+    <div class="leitura" role="group" aria-label="Ajustes de leitura">
+      <button type="button" class="btn" id="menor">Texto menor</button>
+      <button type="button" class="btn" id="maior">Texto maior</button>
+      <button type="button" class="btn" id="contraste" aria-pressed="false">Alto contraste</button>
+      <button type="button" class="btn" id="ouvir" hidden>Ouvir saldo</button>
+    </div>
+  </header>
+
+  <section class="saldo" aria-labelledby="titulo-saldo">
+    <h2 class="saldo-rotulo" id="titulo-saldo">Saldo</h2>
+    <p class="saldo-valor" id="saldo-valor">R$ 0,00</p>
+    <p class="saldo-estado" id="saldo-estado">Nenhum lançamento ainda.</p>
+    <ul class="totais">
+      <li>Entradas: <strong class="cor-entrada" id="total-entradas">R$ 0,00</strong></li>
+      <li>Saídas: <strong class="cor-saida" id="total-saidas">R$ 0,00</strong></li>
+    </ul>
+  </section>
+
+  <form id="novo" novalidate aria-labelledby="titulo-novo">
+    <h2 id="titulo-novo">Novo lançamento</h2>
+    <fieldset>
+      <legend>Tipo</legend>
+      <div class="opcoes">
+        <label class="opcao"><input type="radio" name="tipo" value="saida" checked> Saída (gastei)</label>
+        <label class="opcao"><input type="radio" name="tipo" value="entrada"> Entrada (recebi)</label>
+      </div>
+    </fieldset>
+    <div class="campo">
+      <label for="descricao">Descrição</label>
+      <input type="text" id="descricao" maxlength="80" autocomplete="off" required aria-describedby="erro-descricao">
+      <p class="erro" id="erro-descricao"></p>
+    </div>
+    <div class="campo">
+      <label for="valor">Valor em reais</label>
+      <p class="dica" id="dica-valor">Use vírgula para os centavos. Exemplo: 45,90</p>
+      <input type="text" id="valor" inputmode="decimal" autocomplete="off" required aria-describedby="dica-valor erro-valor">
+      <p class="erro" id="erro-valor"></p>
+    </div>
+    <button type="submit" class="btn btn-principal">Adicionar</button>
+  </form>
+
+  <section aria-labelledby="titulo-lista">
+    <div class="lista-topo">
+      <h2 id="titulo-lista" tabindex="-1">Lançamentos</h2>
+      <p class="salvo-em" id="salvo-em"></p>
+    </div>
+    <ul class="lista" id="lista">
+      <li class="vazio">Carregando seus lançamentos…</li>
+    </ul>
+  </section>
+</main>
+
+<div class="sr" id="aviso" aria-live="polite" aria-atomic="true"></div>
+<div class="sr" id="aviso-urgente" aria-live="assertive" aria-atomic="true"></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const TAMANHOS = [100, 125, 150, 175, 200];
+  const CHAVE_LOCAL = 'cp-lancamentos';
+
+  const reais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const dinheiro = (v) => reais.format(v);
+  const pad = (n) => String(n).padStart(2, '0');
+  function hoje() {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  function dataLonga(iso) {
+    const [a, m, d] = String(iso).split('-').map(Number);
+    if (!a || !m || !d) return '';
+    return `${d} de ${MESES[m - 1]} de ${a}`;
+  }
+  // Aceita "1.250,90", "45,9", "R$ 30", "12.5"
+  function lerValor(texto) {
+    let s = String(texto).replace(/\s|R\$/gi, '').replace(/[^\d.,-]/g, '');
+    if (!s) return null;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    const v = Number(s);
+    return Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
+  }
+  // "650 reais e 90 centavos", para a voz
+  function valorFalado(v) {
+    const c = Math.round(Math.abs(v) * 100);
+    const r = Math.floor(c / 100), cent = c % 100;
+    const partes = [];
+    if (r || !cent) partes.push(`${r.toLocaleString('pt-BR')} ${r === 1 ? 'real' : 'reais'}`);
+    if (cent) partes.push(`${cent} ${cent === 1 ? 'centavo' : 'centavos'}`);
+    return partes.join(' e ');
+  }
+
+  let anuncioTimer;
+  function anunciar(msg, urgente = false) {
+    const el = $(urgente ? 'aviso-urgente' : 'aviso');
+    el.textContent = '';
+    clearTimeout(anuncioTimer);
+    anuncioTimer = setTimeout(() => { el.textContent = msg; }, 80);
+  }
+
+  // ---------- Preferências de leitura (só neste navegador) ----------
+  let prefs = { texto: 100, contraste: false };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem('cp-prefs') || '{}') }; } catch (e) {}
+  function salvarPrefs() {
+    try { localStorage.setItem('cp-prefs', JSON.stringify(prefs)); } catch (e) {}
+  }
+  function aplicarPrefs() {
+    document.documentElement.style.fontSize = prefs.texto + '%';
+    document.documentElement.classList.toggle('hc', !!prefs.contraste);
+    $('contraste').setAttribute('aria-pressed', String(!!prefs.contraste));
+  }
+  function mudarTexto(dir) {
+    const i = TAMANHOS.indexOf(prefs.texto);
+    const n = (i === -1 ? 0 : i) + dir;
+    if (n < 0) return anunciar('O texto já está no tamanho normal.');
+    if (n >= TAMANHOS.length) return anunciar('O texto já está no tamanho máximo, 200%.');
+    prefs.texto = TAMANHOS[n];
+    salvarPrefs(); aplicarPrefs();
+    anunciar(`Tamanho do texto: ${prefs.texto}%.`);
+  }
+  $('menor').addEventListener('click', () => mudarTexto(-1));
+  $('maior').addEventListener('click', () => mudarTexto(1));
+  $('contraste').addEventListener('click', () => {
+    prefs.contraste = !prefs.contraste;
+    salvarPrefs(); aplicarPrefs();
+    anunciar(prefs.contraste ? 'Alto contraste ligado.' : 'Alto contraste desligado.');
+  });
+  aplicarPrefs();
+
+  // ---------- Dados ----------
+  // Na página publicada: salvo na conta da pessoa (privado). Aberto como arquivo: salvo neste navegador.
+  let itens = [];
+  let colecao = null;
+  let carregado = false;
+  let confirmando = null;
+
+  function lerLocal() {
+    try { const v = JSON.parse(localStorage.getItem(CHAVE_LOCAL) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function gravarLocal() {
+    try { localStorage.setItem(CHAVE_LOCAL, JSON.stringify(itens)); return true; } catch (e) { return false; }
+  }
+  function usarLocal() {
+    itens = lerLocal();
+    carregado = true;
+    $('salvo-em').textContent = 'Salvo só neste navegador.';
+    desenhar();
+  }
+
+  async function iniciar() {
+    if (!window.claude || !window.claude.use) return usarLocal();
+    const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+    const id = user ? await user.id() : null;
+    if (!db || !id) return usarLocal();
+    colecao = db.collection('data/users/' + id);
+    $('salvo-em').textContent = 'Salvo na sua conta. Só você vê.';
+    colecao.onSnapshot((snap) => {
+      itens = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      carregado = true;
+      desenhar();
+    }, () => {
+      $('salvo-em').textContent = 'Não foi possível carregar da sua conta agora. Recarregue a página.';
+    });
+  }
+
+  const novoId = () => 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  async function adicionar(item) {
+    if (colecao) {
+      const { id, ...corpo } = item;
+      await colecao.doc(id).set(corpo);
+    } else {
+      itens.push(item);
+      if (!gravarLocal()) throw new Error('local');
+      desenhar();
+    }
+  }
+  async function remover(id) {
+    if (colecao) {
+      await colecao.doc(id).delete();
+    } else {
+      itens = itens.filter((i) => i.id !== id);
+      gravarLocal();
+      desenhar();
+    }
+  }
+
+  // ---------- Tela ----------
+  function totais() {
+    let entradas = 0, saidas = 0;
+    itens.forEach((i) => { if (i.tipo === 'entrada') entradas += i.valor; else saidas += i.valor; });
+    entradas = Math.round(entradas * 100) / 100;
+    saidas = Math.round(saidas * 100) / 100;
+    return { entradas, saidas, saldo: Math.round((entradas - saidas) * 100) / 100 };
+  }
+
+  function desenhar() {
+    const t = totais();
+    $('saldo-valor').textContent = dinheiro(t.saldo);
+    $('total-entradas').textContent = dinheiro(t.entradas);
+    $('total-saidas').textContent = dinheiro(t.saidas);
+    $('saldo-estado').textContent = !itens.length ? 'Nenhum lançamento ainda.'
+      : t.saldo > 0 ? 'Positivo: sobrou dinheiro.'
+      : t.saldo < 0 ? 'Negativo: saiu mais do que entrou.'
+      : 'Zerado.';
+    $('saldo-estado').className = 'saldo-estado ' + (t.saldo > 0 ? 'cor-entrada' : t.saldo < 0 ? 'cor-saida' : '');
+
+    const lista = $('lista');
+    lista.textContent = '';
+    if (!carregado) {
+      lista.innerHTML = '<li class="vazio">Carregando seus lançamentos…</li>';
+      return;
+    }
+    if (!itens.length) {
+      lista.innerHTML = '<li class="vazio">Ainda não há lançamentos. Use o formulário “Novo lançamento” acima: escolha Saída ou Entrada, escreva a descrição e o valor, e aperte Adicionar.</li>';
+      return;
+    }
+    const ordem = [...itens].sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.criado || 0) - (a.criado || 0));
+    ordem.forEach((i) => lista.appendChild(linha(i)));
+  }
+
+  function linha(i) {
+    const entrada = i.tipo === 'entrada';
+    const tipo = entrada ? 'Entrada' : 'Saída';
+    const li = document.createElement('li');
+    li.className = 'item ' + (entrada ? 'item-entrada' : 'item-saida');
+    li.dataset.id = i.id;
+
+    const texto = document.createElement('div');
+    const h3 = document.createElement('h3');
+    h3.textContent = i.descricao;
+    const meta = document.createElement('p');
+    meta.className = 'item-meta';
+    meta.innerHTML = `<span class="etiqueta"></span>, <span class="quando"></span>`;
+    meta.querySelector('.etiqueta').textContent = tipo;
+    meta.querySelector('.quando').textContent = dataLonga(i.data);
+    texto.append(h3, meta);
+
+    const valor = document.createElement('p');
+    valor.className = 'item-valor';
+    valor.innerHTML = `<span aria-hidden="true">${entrada ? '+' : '−'} </span>`;
+    valor.append(dinheiro(i.valor));
+
+    const acoes = document.createElement('div');
+    acoes.className = 'item-acoes';
+    const nome = `${i.descricao}, ${tipo.toLowerCase()} de ${dinheiro(i.valor)}`;
+    if (confirmando === i.id) {
+      const pergunta = document.createElement('p');
+      pergunta.textContent = 'Excluir este lançamento?';
+      const sim = botao('Sim, excluir', 'btn btn-perigo', `: ${nome}`);
+      sim.dataset.acao = 'confirmar';
+      const nao = botao('Cancelar', 'btn');
+      nao.dataset.acao = 'cancelar';
+      acoes.append(pergunta, sim, nao);
+    } else {
+      const excluir = botao('Excluir', 'btn btn-perigo', `: ${nome}`);
+      excluir.dataset.acao = 'excluir';
+      acoes.append(excluir);
+    }
+    li.append(texto, valor, acoes);
+    return li;
+  }
+
+  function botao(texto, classe, extraLeitor) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = classe;
+    b.textContent = texto;
+    if (extraLeitor) {
+      const s = document.createElement('span');
+      s.className = 'sr';
+      s.textContent = extraLeitor;
+      b.append(s);
+    }
+    return b;
+  }
+
+  function focar(id, acao) {
+    const b = document.querySelector(`.item[data-id="${CSS.escape(id)}"] [data-acao="${acao}"]`);
+    if (b) b.focus();
+  }
+
+  $('lista').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-acao]');
+    if (!b) return;
+    const li = b.closest('.item');
+    const id = li.dataset.id;
+    const item = itens.find((x) => x.id === id);
+    if (!item) return;
+    const acao = b.dataset.acao;
+    if (acao === 'excluir') {
+      confirmando = id;
+      desenhar();
+      focar(id, 'confirmar');
+      anunciar(`Confirme: excluir ${item.descricao}?`);
+    } else if (acao === 'cancelar') {
+      confirmando = null;
+      desenhar();
+      focar(id, 'excluir');
+      anunciar('Exclusão cancelada.');
+    } else if (acao === 'confirmar') {
+      const vizinho = li.nextElementSibling || li.previousElementSibling;
+      const idVizinho = vizinho && vizinho.dataset.id;
+      confirmando = null;
+      try {
+        await remover(id);
+      } catch (err) {
+        desenhar();
+        return anunciar('Não foi possível excluir agora. Tente de novo.', true);
+      }
+      setTimeout(() => {
+        if (idVizinho && document.querySelector(`.item[data-id="${CSS.escape(idVizinho)}"]`)) focar(idVizinho, 'excluir');
+        else $('titulo-lista').focus();
+      }, 50);
+      anunciar(`${item.descricao} excluído. Saldo agora: ${dinheiro(totais().saldo)}.`);
+    }
+  });
+
+  // ---------- Formulário ----------
+  function erro(campo, msg) {
+    $(campo).setAttribute('aria-invalid', 'true');
+    $('erro-' + campo).textContent = 'Erro: ' + msg;
+  }
+  function limparErro(campo) {
+    $(campo).removeAttribute('aria-invalid');
+    $('erro-' + campo).textContent = '';
+  }
+  ['descricao', 'valor'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+
+  $('novo').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    limparErro('descricao'); limparErro('valor');
+    const descricao = $('descricao').value.trim();
+    const valor = lerValor($('valor').value);
+    const tipo = document.querySelector('input[name="tipo"]:checked').value;
+    if (!descricao) erro('descricao', 'escreva o que foi, por exemplo: Mercado.');
+    if (valor === null) erro('valor', 'digite o valor em números, por exemplo: 45,90.');
+    else if (valor <= 0) erro('valor', 'o valor precisa ser maior que zero.');
+    const invalido = document.querySelector('#novo [aria-invalid="true"]');
+    if (invalido) {
+      anunciar('Não foi possível adicionar. Corrija o campo indicado.', true);
+      setTimeout(() => invalido.focus(), 50);
+      return;
+    }
+    if (!carregado) return anunciar('Aguarde, seus lançamentos ainda estão carregando.', true);
+
+    const item = { id: novoId(), tipo, descricao, valor, data: hoje(), criado: Date.now() };
+    try {
+      await adicionar(item);
+    } catch (err) {
+      return anunciar('Não foi possível salvar agora. Tente de novo.', true);
+    }
+    $('descricao').value = '';
+    $('valor').value = '';
+    $('descricao').focus();
+    const tipoTexto = tipo === 'entrada' ? 'Entrada' : 'Saída';
+    anunciar(`${tipoTexto} adicionada: ${descricao}, ${dinheiro(valor)}. Saldo agora: ${dinheiro(totais().saldo)}.`);
+  });
+
+  // ---------- Ouvir o saldo em voz alta ----------
+  const voz = 'speechSynthesis' in window ? window.speechSynthesis : null;
+  if (voz) {
+    $('ouvir').hidden = false;
+    $('ouvir').addEventListener('click', () => {
+      if (voz.speaking) { voz.cancel(); return; }
+      const t = totais();
+      const frase = !itens.length ? 'Você ainda não tem lançamentos.'
+        : `Seu saldo é ${t.saldo < 0 ? 'negativo, menos ' : ''}${valorFalado(t.saldo)}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}.`;
+      const u = new SpeechSynthesisUtterance(frase);
+      u.lang = 'pt-BR';
+      const pt = voz.getVoices().find((v) => /^pt[-_]BR/i.test(v.lang)) || voz.getVoices().find((v) => /^pt/i.test(v.lang));
+      if (pt) u.voice = pt;
+      voz.cancel();
+      voz.speak(u);
+    });
+  }
+
+  $('pular').addEventListener('click', (e) => {
+    e.preventDefault();
+    $('descricao').focus();
+  });
+
+  desenhar();
+  iniciar();
+})();
+</script>
+</body>
+</html>
