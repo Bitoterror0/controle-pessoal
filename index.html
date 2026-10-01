@@ -52,6 +52,7 @@
   }
 
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     background: var(--fundo);
     color: var(--tinta);
@@ -108,6 +109,11 @@
   .btn-principal { background: var(--marca); color: var(--sobre-marca); border-color: var(--marca); width: 100%; font-size: 1.15rem; }
   .btn-perigo { color: var(--saida); border-color: var(--saida); }
 
+  /* Mês */
+  .mes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .mes-nome { flex: 1 1 10rem; text-align: center; font-size: 1.3rem; font-weight: 700; }
+  .mes-atual { flex: 1 1 100%; }
+
   /* Saldo */
   .saldo {
     background: var(--papel);
@@ -148,7 +154,7 @@
   .campo { display: grid; gap: 0.3rem; }
   .campo label { font-weight: 700; }
   .dica { color: var(--tinta-2); font-size: 0.95rem; }
-  input[type="text"] {
+  input[type="text"], input[type="date"] {
     width: 100%; min-height: 3rem; padding: 0.5rem 0.75rem;
     font: inherit; color: var(--tinta); background: var(--fundo);
     border: 2px solid var(--tinta); border-radius: 8px;
@@ -205,6 +211,13 @@
     </div>
   </header>
 
+  <nav class="mes" aria-label="Escolher o mês">
+    <button type="button" class="btn" id="mes-anterior">Mês anterior</button>
+    <p class="mes-nome" id="mes-nome"></p>
+    <button type="button" class="btn" id="mes-proximo">Próximo mês</button>
+    <button type="button" class="btn mes-atual" id="mes-atual">Ir para o mês atual</button>
+  </nav>
+
   <section class="saldo" aria-labelledby="titulo-saldo">
     <h2 class="saldo-rotulo" id="titulo-saldo">Saldo</h2>
     <p class="saldo-valor" id="saldo-valor">R$ 0,00</p>
@@ -234,6 +247,18 @@
       <p class="dica" id="dica-valor">Use vírgula para os centavos. Exemplo: 45,90</p>
       <input type="text" id="valor" inputmode="decimal" autocomplete="off" required aria-describedby="dica-valor erro-valor">
       <p class="erro" id="erro-valor"></p>
+    </div>
+    <div class="campo">
+      <label for="categoria">Categoria (opcional)</label>
+      <p class="dica" id="dica-categoria">Exemplo: Mercado, Transporte, Saúde. Sem categoria, fica em “Sem categoria”.</p>
+      <input type="text" id="categoria" maxlength="40" autocomplete="off" list="categorias" aria-describedby="dica-categoria">
+      <datalist id="categorias"></datalist>
+    </div>
+    <div class="campo">
+      <label for="data">Data</label>
+      <p class="dica" id="dica-data">Por padrão, hoje. Muda se o gasto foi em outro dia.</p>
+      <input type="date" id="data" required aria-describedby="dica-data erro-data">
+      <p class="erro" id="erro-data"></p>
     </div>
     <button type="submit" class="btn btn-principal">Adicionar</button>
   </form>
@@ -387,20 +412,43 @@
   }
 
   // ---------- Tela ----------
-  function totais() {
+  // Mês em exibição, "AAAA-MM". Começa no mês atual.
+  let mes = hoje().slice(0, 7);
+  const nomeMes = (m = mes) => {
+    const [a, n] = m.split('-').map(Number);
+    return `${MESES[n - 1]} de ${a}`;
+  };
+  function moverMes(delta) {
+    const [a, n] = mes.split('-').map(Number);
+    const d = new Date(a, n - 1 + delta, 1);
+    mes = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  }
+  const itensDoMes = (m = mes) => itens.filter((i) => String(i.data).slice(0, 7) === m);
+  // Lançamentos antigos não têm categoria
+  const categoriaDe = (i) => (i.categoria && String(i.categoria).trim()) || 'Sem categoria';
+
+  function totais(lista = itensDoMes()) {
     let entradas = 0, saidas = 0;
-    itens.forEach((i) => { if (i.tipo === 'entrada') entradas += i.valor; else saidas += i.valor; });
+    lista.forEach((i) => { if (i.tipo === 'entrada') entradas += i.valor; else saidas += i.valor; });
     entradas = Math.round(entradas * 100) / 100;
     saidas = Math.round(saidas * 100) / 100;
     return { entradas, saidas, saldo: Math.round((entradas - saidas) * 100) / 100 };
   }
 
   function desenhar() {
-    const t = totais();
+    const doMes = itensDoMes();
+    const t = totais(doMes);
+    $('mes-nome').textContent = nomeMes();
+    $('titulo-saldo').textContent = `Saldo de ${nomeMes()}`;
+    $('titulo-lista').textContent = `Lançamentos de ${nomeMes()}`;
+    $('mes-atual').hidden = mes === hoje().slice(0, 7);
+    // Sugestões de categoria: as já usadas
+    const usadas = [...new Set(itens.map((i) => i.categoria && String(i.categoria).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    $('categorias').replaceChildren(...usadas.map((c) => { const o = document.createElement('option'); o.value = c; return o; }));
     $('saldo-valor').textContent = dinheiro(t.saldo);
     $('total-entradas').textContent = dinheiro(t.entradas);
     $('total-saidas').textContent = dinheiro(t.saidas);
-    $('saldo-estado').textContent = !itens.length ? 'Nenhum lançamento ainda.'
+    $('saldo-estado').textContent = !doMes.length ? 'Nenhum lançamento neste mês.'
       : t.saldo > 0 ? 'Positivo: sobrou dinheiro.'
       : t.saldo < 0 ? 'Negativo: saiu mais do que entrou.'
       : 'Zerado.';
@@ -412,11 +460,11 @@
       lista.innerHTML = '<li class="vazio">Carregando seus lançamentos…</li>';
       return;
     }
-    if (!itens.length) {
-      lista.innerHTML = '<li class="vazio">Ainda não há lançamentos. Use o formulário “Novo lançamento” acima: escolha Saída ou Entrada, escreva a descrição e o valor, e aperte Adicionar.</li>';
+    if (!doMes.length) {
+      lista.innerHTML = '<li class="vazio">Não há lançamentos neste mês. Use o formulário “Novo lançamento”: escolha Saída ou Entrada, escreva a descrição e o valor, e aperte Adicionar. Ou troque de mês nos botões acima.</li>';
       return;
     }
-    const ordem = [...itens].sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.criado || 0) - (a.criado || 0));
+    const ordem = [...doMes].sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.criado || 0) - (a.criado || 0));
     ordem.forEach((i) => lista.appendChild(linha(i)));
   }
 
@@ -432,9 +480,10 @@
     h3.textContent = i.descricao;
     const meta = document.createElement('p');
     meta.className = 'item-meta';
-    meta.innerHTML = `<span class="etiqueta"></span>, <span class="quando"></span>`;
+    meta.innerHTML = `<span class="etiqueta"></span>, <span class="quando"></span>, categoria: <span class="cat"></span>`;
     meta.querySelector('.etiqueta').textContent = tipo;
     meta.querySelector('.quando').textContent = dataLonga(i.data);
+    meta.querySelector('.cat').textContent = categoriaDe(i);
     texto.append(h3, meta);
 
     const valor = document.createElement('p');
@@ -526,15 +575,19 @@
     $(campo).removeAttribute('aria-invalid');
     $('erro-' + campo).textContent = '';
   }
-  ['descricao', 'valor'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+  ['descricao', 'valor', 'data'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+  $('data').value = hoje();
 
   $('novo').addEventListener('submit', async (e) => {
     e.preventDefault();
-    limparErro('descricao'); limparErro('valor');
+    limparErro('descricao'); limparErro('valor'); limparErro('data');
     const descricao = $('descricao').value.trim();
     const valor = lerValor($('valor').value);
+    const categoria = $('categoria').value.trim();
+    const data = $('data').value;
     const tipo = document.querySelector('input[name="tipo"]:checked').value;
     if (!descricao) erro('descricao', 'escreva o que foi, por exemplo: Mercado.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) erro('data', 'escolha uma data válida.');
     if (valor === null) erro('valor', 'digite o valor em números, por exemplo: 45,90.');
     else if (valor <= 0) erro('valor', 'o valor precisa ser maior que zero.');
     const invalido = document.querySelector('#novo [aria-invalid="true"]');
@@ -545,7 +598,11 @@
     }
     if (!carregado) return anunciar('Aguarde, seus lançamentos ainda estão carregando.', true);
 
-    const item = { id: novoId(), tipo, descricao, valor, data: hoje(), criado: Date.now() };
+    const item = { id: novoId(), tipo, descricao, valor, data, criado: Date.now() };
+    if (categoria) item.categoria = categoria;
+    // Se o lançamento é de outro mês, mostra esse mês para ele não "sumir"
+    const outroMes = data.slice(0, 7) !== mes;
+    if (outroMes) mes = data.slice(0, 7);
     try {
       await adicionar(item);
     } catch (err) {
@@ -553,9 +610,24 @@
     }
     $('descricao').value = '';
     $('valor').value = '';
+    $('categoria').value = '';
     $('descricao').focus();
     const tipoTexto = tipo === 'entrada' ? 'Entrada' : 'Saída';
-    anunciar(`${tipoTexto} adicionada: ${descricao}, ${dinheiro(valor)}. Saldo agora: ${dinheiro(totais().saldo)}.`);
+    anunciar(`${tipoTexto} adicionada: ${descricao}, ${dinheiro(valor)}, categoria ${categoria || 'sem categoria'}. ${outroMes ? `Mostrando ${nomeMes()}. ` : ''}Saldo de ${nomeMes()}: ${dinheiro(totais().saldo)}.`);
+  });
+
+  // ---------- Escolher o mês ----------
+  function anunciarMes() {
+    const doMes = itensDoMes();
+    const t = totais(doMes);
+    anunciar(`${nomeMes()}. ${doMes.length ? `${doMes.length} ${doMes.length === 1 ? 'lançamento' : 'lançamentos'}. Saldo: ${dinheiro(t.saldo)}.` : 'Nenhum lançamento neste mês.'}`);
+  }
+  $('mes-anterior').addEventListener('click', () => { moverMes(-1); desenhar(); anunciarMes(); });
+  $('mes-proximo').addEventListener('click', () => { moverMes(1); desenhar(); anunciarMes(); });
+  $('mes-atual').addEventListener('click', () => {
+    mes = hoje().slice(0, 7);
+    desenhar(); anunciarMes();
+    $('mes-proximo').focus();
   });
 
   // ---------- Ouvir o saldo em voz alta ----------
@@ -565,8 +637,8 @@
     $('ouvir').addEventListener('click', () => {
       if (voz.speaking) { voz.cancel(); return; }
       const t = totais();
-      const frase = !itens.length ? 'Você ainda não tem lançamentos.'
-        : `Seu saldo é ${t.saldo < 0 ? 'negativo, menos ' : ''}${valorFalado(t.saldo)}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}.`;
+      const frase = !itensDoMes().length ? `Você não tem lançamentos em ${nomeMes()}.`
+        : `Saldo de ${nomeMes()}: ${t.saldo < 0 ? 'negativo, menos ' : ''}${valorFalado(t.saldo)}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}.`;
       const u = new SpeechSynthesisUtterance(frase);
       u.lang = 'pt-BR';
       const pt = voz.getVoices().find((v) => /^pt[-_]BR/i.test(v.lang)) || voz.getVoices().find((v) => /^pt/i.test(v.lang));
