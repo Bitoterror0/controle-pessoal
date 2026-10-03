@@ -12,8 +12,8 @@
   // Preferências de leitura (só deste navegador): aplicadas antes de desenhar
   try {
     var p = JSON.parse(localStorage.getItem('cp-prefs') || '{}');
-    if (p.texto) document.documentElement.style.fontSize = p.texto + '%';
-    if (p.contraste) document.documentElement.classList.add('hc');
+    if ([100, 125, 150, 175, 200].includes(p && p.texto)) document.documentElement.style.fontSize = p.texto + '%';
+    if (p && p.contraste === true) document.documentElement.classList.add('hc');
   } catch (e) {}
 </script>
 <style>
@@ -54,6 +54,7 @@
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body {
+    margin: 0;
     background: var(--fundo);
     color: var(--tinta);
     font-family: var(--fonte);
@@ -66,8 +67,10 @@
     padding-inline: 16px;
     padding-block: 1.25rem 3rem;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.25rem;
   }
+  .pagina *, .pagina > * { min-width: 0; }
   h1, h2, h3, p { margin: 0; text-wrap: balance; overflow-wrap: break-word; }
   h1 { font-size: 1.9rem; line-height: 1.15; }
   h2 { font-size: 1.35rem; }
@@ -98,6 +101,7 @@
   .leitura { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
   .btn {
+    max-width: 100%; overflow-wrap: anywhere; white-space: normal;
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
     min-height: 2.9rem; padding: 0.5rem 1rem;
     font: inherit; font-weight: 700; line-height: 1.2;
@@ -156,7 +160,8 @@
     border: 2px solid var(--linha); border-radius: 10px; cursor: pointer;
   }
   .opcao:has(input:checked) { border: 3px solid var(--tinta); font-weight: 700; }
-  .opcao input { width: 1.4rem; height: 1.4rem; margin: 0; accent-color: var(--marca); }
+  .opcao input { width: 1.4rem; height: 1.4rem; margin: 0; flex-shrink: 0; accent-color: var(--marca); }
+  .opcao, .totais li, label { overflow-wrap: anywhere; }
   .campo { display: grid; gap: 0.3rem; }
   .campo label { font-weight: 700; }
   .dica { color: var(--tinta-2); font-size: 0.95rem; }
@@ -196,11 +201,12 @@
   .etiqueta { font-weight: 700; }
   .item-entrada .etiqueta, .item-entrada .item-valor { color: var(--entrada); }
   .item-saida .etiqueta, .item-saida .item-valor { color: var(--saida); }
-  .item-valor { font-weight: 700; font-size: 1.2rem; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .item-valor { font-weight: 700; font-size: 1.2rem; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
   .item-acoes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
   .vazio { border: 2px dashed var(--linha); border-radius: 12px; padding: 1.2rem; color: var(--tinta-2); }
 
   @media (max-width: 30rem) {
+    form, .saldo, .voz { padding-inline: 12px; }
     .item { grid-template-columns: minmax(0, 1fr); }
     .item-valor { text-align: left; }
   }
@@ -223,6 +229,9 @@
     </div>
   </header>
 
+  <p class="erro" id="estado-dados" role="alert" hidden></p>
+  <button type="button" class="btn" id="backup-dados" hidden>Baixar cópia dos dados para recuperação</button>
+  <p id="estado-operacao" aria-live="off"></p>
   <nav class="mes" aria-label="Escolher o mês">
     <button type="button" class="btn" id="mes-anterior">Mês anterior</button>
     <p class="mes-nome" id="mes-nome"></p>
@@ -264,22 +273,24 @@
     </div>
     <div class="campo">
       <label for="valor">Valor em reais</label>
-      <p class="dica" id="dica-valor">Use vírgula para os centavos. Exemplo: 45,90</p>
+      <p class="dica" id="dica-valor">Use vírgula para os centavos. Exemplo: 45,90. Até R$ 999.999.999,99, com no máximo duas casas decimais.</p>
       <input type="text" id="valor" inputmode="decimal" autocomplete="off" required aria-describedby="dica-valor erro-valor">
       <p class="erro" id="erro-valor"></p>
     </div>
     <div class="campo">
       <label for="categoria">Categoria (opcional)</label>
       <p class="dica" id="dica-categoria">Exemplo: Mercado, Transporte, Saúde. Sem categoria, fica em “Sem categoria”.</p>
-      <input type="text" id="categoria" maxlength="40" autocomplete="off" list="categorias" aria-describedby="dica-categoria">
+      <input type="text" id="categoria" maxlength="40" autocomplete="off" list="categorias" aria-describedby="dica-categoria erro-categoria">
       <datalist id="categorias"></datalist>
+      <p class="erro" id="erro-categoria"></p>
     </div>
     <div class="campo">
       <label for="data">Data</label>
       <p class="dica" id="dica-data">Por padrão, hoje. Muda se o gasto foi em outro dia.</p>
-      <input type="date" id="data" required aria-describedby="dica-data erro-data">
+      <input type="date" id="data" min="1900-01-01" max="9999-12-31" required aria-describedby="dica-data erro-data">
       <p class="erro" id="erro-data"></p>
     </div>
+    <label class="opcao" id="duplicado-aviso" hidden><input type="checkbox" id="confirmar-duplicado"> Já existe um lançamento igual. Confirmo que este é outro lançamento.</label>
     <button type="submit" class="btn btn-principal">Adicionar</button>
   </form>
 
@@ -304,7 +315,7 @@
       </div>
       <div class="campo">
         <label for="c-valor">Valor em reais</label>
-        <p class="dica" id="dica-c-valor">Use vírgula para os centavos. Exemplo: 650,90</p>
+        <p class="dica" id="dica-c-valor">Use vírgula para os centavos. Exemplo: 650,90. Até R$ 999.999.999,99, com no máximo duas casas decimais.</p>
         <input type="text" id="c-valor" inputmode="decimal" autocomplete="off" required aria-describedby="dica-c-valor erro-c-valor">
         <p class="erro" id="erro-c-valor"></p>
       </div>
@@ -314,13 +325,15 @@
         <input type="text" id="c-dia" inputmode="numeric" maxlength="2" autocomplete="off" required aria-describedby="dica-c-dia erro-c-dia">
         <p class="erro" id="erro-c-dia"></p>
       </div>
+      <p class="dica">A conta começa no mês do cadastro. Se o dia já passou, esse mês aparece como atrasado. Marcar como paga não registra uma saída no saldo.</p>
+      <label class="opcao" id="c-duplicado-aviso" hidden><input type="checkbox" id="c-confirmar-duplicado"> Já existe uma conta igual. Confirmo que esta é outra conta.</label>
       <button type="submit" class="btn btn-principal">Adicionar conta</button>
     </form>
     <p class="salvo-em" id="contas-resumo"></p>
     <ul class="lista" id="lista-contas"></ul>
     <div class="exportar">
       <button type="button" class="btn" id="exportar">Exportar contas para a agenda (.ics)</button>
-      <p class="dica" id="dica-exportar">Gera o arquivo contas-a-vencer.ics, com um evento mensal por conta e um lembrete um dia antes. Cada conta tem um código fixo: agendas que reconhecem esse código atualizam o evento ao importar de novo, em vez de repetir. O arquivo é uma cópia de hoje: contas excluídas ou marcadas como pagas aqui não mudam na agenda sozinhas. O lembrete depende do aplicativo da agenda.</p>
+      <p class="dica" id="dica-exportar">Gera o arquivo contas-a-vencer.ics, com um evento mensal por conta e um lembrete um dia antes. Cada conta tem um código fixo, mas algumas agendas podem repetir eventos ao reimportar. Confira na sua agenda antes de importar outra vez. O arquivo é uma cópia de hoje: contas excluídas ou marcadas como pagas aqui não mudam na agenda sozinhas. O lembrete depende do aplicativo da agenda.</p>
     </div>
   </section>
 </main>
@@ -348,14 +361,45 @@
     if (!a || !m || !d) return '';
     return `${d} de ${MESES[m - 1]} de ${a}`;
   }
-  // Aceita "1.250,90", "45,9", "R$ 30", "12.5"
+  // Valores completos, no máximo dois centavos; não remove letras nem arredonda entrada inválida.
+  const VALOR_MAXIMO = 999999999.99;
+  const MAX_REGISTROS = 10000;
   function lerValor(texto) {
-    let s = String(texto).replace(/\s|R\$/gi, '').replace(/[^\d.,-]/g, '');
-    if (!s) return null;
-    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
-    else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
-    const v = Number(s);
-    return Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
+    let t = String(texto).trim().replace(/^R\$\s*/i, '');
+    if (/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d{1,2})?$/.test(t)) t = t.replace(/\./g, '').replace(',', '.');
+    else if (/^\d+(?:[,.]\d{1,2})?$/.test(t)) t = t.replace(',', '.');
+    else return null;
+    const centavos = Math.round(Number(t) * 100);
+    return Number.isSafeInteger(centavos) && centavos <= Math.round(VALOR_MAXIMO * 100) ? centavos / 100 : null;
+  }
+  function mesValido(m) {
+    return typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m) && +m.slice(0,4) >= 1900;
+  }
+  function dataValida(iso) {
+    if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !mesValido(iso.slice(0,7))) return false;
+    const [a,m,d] = iso.split('-').map(Number);
+    return d >= 1 && d <= new Date(Date.UTC(a,m,0)).getUTCDate();
+  }
+  const normalizarTexto = (t) => t.normalize('NFC').trim().replace(/\s+/g, ' ');
+  function registroValido(r, conta = false) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return false;
+    if (typeof r.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(r.id)) return false;
+    if (typeof r.descricao !== 'string' || !normalizarTexto(r.descricao) || r.descricao.length > 80) return false;
+    if (typeof r.valor !== 'number' || r.valor <= 0 || r.valor > VALOR_MAXIMO || !Number.isFinite(r.valor) || Math.abs(r.valor * 100 - Math.round(r.valor * 100)) > 0.00002) return false;
+    if (r.criado !== undefined && (!Number.isFinite(r.criado) || r.criado <= 0 || !Number.isFinite(new Date(r.criado).getTime()))) return false;
+    if (!conta) return ['entrada','saida'].includes(r.tipo) && dataValida(r.data) && (r.categoria === undefined || (typeof r.categoria === 'string' && r.categoria.length <= 40));
+    if (r.criado && (new Date(r.criado).getFullYear() < 1900 || new Date(r.criado).getFullYear() > 9998)) return false;
+    if (r.tipo !== 'conta' || !Number.isInteger(r.dia) || r.dia < 1 || r.dia > 31 || !r.criado) return false;
+    if (r.uid !== undefined && (typeof r.uid !== 'string' || !/^[a-zA-Z0-9._@-]{1,150}$/.test(r.uid))) return false;
+    if (r.dataCadastro !== undefined && !dataValida(r.dataCadastro)) return false;
+    if (r.primeiroMes !== undefined && !mesValido(r.primeiroMes)) return false;
+    if (r.pagas !== undefined && (!r.pagas || typeof r.pagas !== 'object' || Array.isArray(r.pagas) || Object.entries(r.pagas).some(([m,v]) => !mesValido(m) || typeof v !== 'boolean'))) return false;
+    return mesValido(r.primeiroMes || mesInicial(r));
+  }
+  function validarLista(lista, conta = false) {
+    if (!Array.isArray(lista) || lista.length > MAX_REGISTROS || lista.some((r) => !registroValido(r, conta))) throw new Error('dados-invalidos');
+    if (new Set(lista.map((r) => r.id)).size !== lista.length || (conta && new Set(lista.map((r) => r.uid || r.id + '@controle-pessoal')).size !== lista.length)) throw new Error('ids-repetidos');
+    return lista;
   }
   // "650 reais e 90 centavos", para a voz
   function valorFalado(v) {
@@ -367,19 +411,27 @@
     return partes.join(' e ');
   }
 
-  let anuncioTimer;
+  const anuncioTimers = {};
   function anunciar(msg, urgente = false) {
     const el = $(urgente ? 'aviso-urgente' : 'aviso');
     el.textContent = '';
-    clearTimeout(anuncioTimer);
-    anuncioTimer = setTimeout(() => { el.textContent = msg; }, 80);
+    $('estado-operacao').textContent = msg;
+    clearTimeout(anuncioTimers[el.id]);
+    anuncioTimers[el.id] = setTimeout(() => { el.textContent = msg; }, 80);
   }
 
   // ---------- Preferências de leitura (só neste navegador) ----------
   let prefs = { texto: 100, contraste: false, avisoAbrir: true };
-  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem('cp-prefs') || '{}') }; } catch (e) {}
+  try {
+    const p = JSON.parse(localStorage.getItem('cp-prefs') || '{}');
+    if (p && typeof p === 'object') {
+      if (TAMANHOS.includes(p.texto)) prefs.texto = p.texto;
+      if (typeof p.contraste === 'boolean') prefs.contraste = p.contraste;
+      if (typeof p.avisoAbrir === 'boolean') prefs.avisoAbrir = p.avisoAbrir;
+    }
+  } catch (e) {}
   function salvarPrefs() {
-    try { localStorage.setItem('cp-prefs', JSON.stringify(prefs)); } catch (e) {}
+    try { localStorage.setItem('cp-prefs', JSON.stringify(prefs)); } catch (e) { anunciar('O ajuste vale nesta sessão, mas não foi possível guardar sua preferência.', true); }
   }
   function aplicarPrefs() {
     document.documentElement.style.fontSize = prefs.texto + '%';
@@ -412,82 +464,136 @@
   let carregado = false;
   let confirmando = null;
 
-  function lerLocal() {
-    try { const v = JSON.parse(localStorage.getItem(CHAVE_LOCAL) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
-  }
-  function gravarLocal() {
-    try { localStorage.setItem(CHAVE_LOCAL, JSON.stringify(itens)); return true; } catch (e) { return false; }
-  }
-  // Contas recorrentes: neste navegador ficam em outra chave; na conta da pessoa, na mesma coleção com tipo "conta"
   const CHAVE_CONTAS = 'cp-contas';
-  function usarLocal() {
-    itens = lerLocal();
-    try { const v = JSON.parse(localStorage.getItem(CHAVE_CONTAS) || '[]'); contas = Array.isArray(v) ? v : []; } catch (e) { contas = []; }
-    carregado = true;
-    $('salvo-em').textContent = 'Salvo só neste navegador.';
-    desenhar();
+  let gravando = false;
+  let problemaDados = '';
+  let dadosDesatualizados = false;
+  const originais = new Map();
+  function falhaDados(msg) {
+    problemaDados = msg;
+    carregado = false;
+    $('estado-dados').hidden = false;
+    $('estado-dados').textContent = msg;
+    $('backup-dados').hidden = !!(window.claude && window.claude.use);
+    $('saldo-valor').textContent = 'Indisponível';
+    $('saldo-estado').textContent = 'Os dados não estão atualizados.';
+    $('total-entradas').textContent = '—'; $('total-saidas').textContent = '—';
+    $('resumo-texto').textContent = '';
+    atualizarBloqueio();
+    anunciar(msg, true);
   }
-
+  function atualizarBloqueio() {
+    document.querySelectorAll('#novo input, #novo button, #nova-conta input, #nova-conta button, #lista button, #lista-contas button').forEach((b) => { b.disabled = gravando || !carregado; });
+    ['mes-anterior','mes-proximo','mes-atual'].forEach((id) => { $(id).disabled = gravando; });
+    $('mes-anterior').disabled ||= mes === '1900-01';
+    $('mes-proximo').disabled ||= mes === '9999-12';
+    $('exportar').disabled = gravando || !carregado || !contas.length;
+    ['resumir','ouvir'].forEach(id => { $(id).disabled = !carregado; });
+    ['novo','nova-conta'].forEach((id) => $(id).setAttribute('aria-busy', String(gravando)));
+  }
+  async function executarGravacao(fn) {
+    if (gravando || !carregado) { anunciar(gravando ? 'Aguarde a operação terminar.' : 'Os dados não estão disponíveis. Recarregue a página antes de tentar novamente.', true); return false; }
+    const focoAntes = document.activeElement;
+    gravando = true; atualizarBloqueio();
+    const espera = setTimeout(() => anunciar('A gravação ainda não foi confirmada. Aguarde e mantenha esta página aberta para evitar repetir a operação.', true), 15000);
+    try { await fn(); return true; }
+    catch (e) { anunciar(problemaDados || 'Não foi possível confirmar a alteração. Seus campos foram mantidos. Verifique o histórico antes de tentar novamente.', true); return false; }
+    finally {
+      clearTimeout(espera); gravando = false; atualizarBloqueio();
+      if (focoAntes && focoAntes.isConnected && !focoAntes.disabled) focoAntes.focus();
+    }
+  }
+  function lerLocal(chave, conta) {
+    const raw = localStorage.getItem(chave);
+    const lista = validarLista(JSON.parse(raw === null ? '[]' : raw), conta);
+    originais.set(chave, raw);
+    return lista;
+  }
+  async function gravarLista(chave, lista) {
+    const escrever = () => {
+      if (dadosDesatualizados || localStorage.getItem(chave) !== originais.get(chave)) {
+        dadosDesatualizados = true;
+        falhaDados('Os dados mudaram em outra aba. Seus campos foram mantidos; recarregue a página para continuar sem sobrescrever as alterações.');
+        throw new Error('outra-aba');
+      }
+      const raw = JSON.stringify(lista);
+      localStorage.setItem(chave, raw);
+      originais.set(chave, raw);
+    };
+    if (navigator.locks && navigator.locks.request) await navigator.locks.request('controle-pessoal:' + chave, escrever);
+    else escrever();
+  }
+  function usarLocal() {
+    try {
+      const l = lerLocal(CHAVE_LOCAL, false), c = lerLocal(CHAVE_CONTAS, true);
+      itens = l; contas = c; carregado = true;
+      $('salvo-em').textContent = 'Salvo só neste navegador. Limpar os dados do navegador apaga este histórico.';
+      desenhar();
+    } catch (e) {
+      falhaDados('Não foi possível ler os dados deste navegador. Nenhum dado foi apagado ou substituído. Baixe uma cópia para recuperação; verifique as permissões de armazenamento e recarregue a página.');
+      desenhar();
+    }
+  }
+  window.addEventListener('storage', (e) => {
+    if (!colecao && (e.key === null || [CHAVE_LOCAL,CHAVE_CONTAS].includes(e.key))) {
+      dadosDesatualizados = true;
+      falhaDados('Os dados mudaram em outra aba. Seus campos foram mantidos; recarregue a página para continuar sem sobrescrever as alterações.');
+    }
+  });
   async function iniciar() {
     if (!window.claude || !window.claude.use) return usarLocal();
-    const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
-    const id = user ? await user.id() : null;
-    if (!db || !id) return usarLocal();
-    colecao = db.collection('data/users/' + id);
-    $('salvo-em').textContent = 'Salvo na sua conta. Só você vê.';
-    colecao.onSnapshot((snap) => {
-      const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      itens = todos.filter((d) => d.tipo !== 'conta');
-      contas = todos.filter((d) => d.tipo === 'conta');
-      carregado = true;
-      desenhar();
-    }, () => {
-      $('salvo-em').textContent = 'Não foi possível carregar da sua conta agora. Recarregue a página.';
-    });
-  }
-
-  const novoId = () => 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-
-  async function adicionar(item) {
-    if (colecao) {
-      const { id, ...corpo } = item;
-      await colecao.doc(id).set(corpo);
-    } else {
-      itens.push(item);
-      if (!gravarLocal()) throw new Error('local');
-      desenhar();
+    const timeout = setTimeout(() => { if (!carregado) falhaDados('A conta demorou a responder. As alterações estão bloqueadas até os dados carregarem.'); }, 15000);
+    try {
+      const [db,user] = await Promise.all([claude.use('db'),claude.use('user')]);
+      const id = user ? await user.id() : null;
+      if (!db || !id) throw new Error('conta-indisponivel');
+      colecao = db.collection('data/users/' + id);
+      colecao.onSnapshot((snap) => {
+        try {
+          const todos = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+          const l = validarLista(todos.filter((d) => d.tipo !== 'conta'));
+          const c = validarLista(todos.filter((d) => d.tipo === 'conta'), true);
+          itens = l; contas = c; carregado = true; problemaDados = '';
+          $('estado-dados').hidden = true; $('backup-dados').hidden = true;
+          $('salvo-em').textContent = 'Salvo na sua conta.';
+          clearTimeout(timeout); desenhar();
+        } catch (e) { falhaDados('Há dados inválidos na conta. As alterações foram bloqueadas para preservar o histórico. Solicite recuperação antes de continuar.'); }
+      }, () => falhaDados('Não foi possível carregar da conta. Seus dados não foram substituídos por dados locais. Verifique o acesso e recarregue a página.'));
+    } catch (e) {
+      clearTimeout(timeout);
+      falhaDados('Não foi possível acessar a conta. Verifique sua conexão e login e recarregue a página. Nenhum dado foi gravado em outro local.');
     }
+  }
+  const novoId = () => window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  async function adicionar(item) {
+    const proxima = validarLista([...itens, item]);
+    if (colecao) { const {id,...corpo} = item; await colecao.doc(id).set(corpo); }
+    else await gravarLista(CHAVE_LOCAL, proxima);
+    itens = colecao ? [...itens.filter(i => i.id !== item.id), item] : proxima;
   }
   async function remover(id) {
-    if (colecao) {
-      await colecao.doc(id).delete();
-    } else {
-      itens = itens.filter((i) => i.id !== id);
-      gravarLocal();
-      desenhar();
-    }
+    const proxima = itens.filter((i) => i.id !== id);
+    if (colecao) await colecao.doc(id).delete(); else await gravarLista(CHAVE_LOCAL, proxima);
+    itens = colecao ? itens.filter(i => i.id !== id) : proxima;
   }
-
   async function salvarConta(conta) {
-    if (colecao) {
-      const { id, ...corpo } = conta;
-      await colecao.doc(id).set(corpo);
-    } else {
-      const i = contas.findIndex((c) => c.id === conta.id);
-      if (i === -1) contas.push(conta); else contas[i] = conta;
-      try { localStorage.setItem(CHAVE_CONTAS, JSON.stringify(contas)); } catch (e) { throw new Error('local'); }
-      desenhar();
-    }
+    const proxima = validarLista([...contas.filter((c) => c.id !== conta.id), conta], true);
+    if (colecao) { const {id,...corpo} = conta; await colecao.doc(id).set(corpo); }
+    else await gravarLista(CHAVE_CONTAS, proxima);
+    contas = colecao ? [...contas.filter(c => c.id !== conta.id), conta] : proxima;
   }
   async function removerConta(id) {
-    if (colecao) {
-      await colecao.doc(id).delete();
-    } else {
-      contas = contas.filter((c) => c.id !== id);
-      try { localStorage.setItem(CHAVE_CONTAS, JSON.stringify(contas)); } catch (e) {}
-      desenhar();
-    }
+    const proxima = contas.filter((c) => c.id !== id);
+    if (colecao) await colecao.doc(id).delete(); else await gravarLista(CHAVE_CONTAS, proxima);
+    contas = colecao ? contas.filter(c => c.id !== id) : proxima;
   }
+  $('backup-dados').addEventListener('click', () => {
+    try {
+      const backup = { formato: 'controle-pessoal-recuperacao', data: hoje(), lancamentos: localStorage.getItem(CHAVE_LOCAL), contas: localStorage.getItem(CHAVE_CONTAS) };
+      baixarArquivo(JSON.stringify(backup, null, 2), 'controle-pessoal-recuperacao.json', 'application/json');
+      anunciar('Cópia de recuperação gerada. Guarde em local privado: ela contém seu histórico financeiro.');
+    } catch (e) { anunciar('Não foi possível baixar a cópia. Nenhum dado foi apagado. Verifique as permissões do navegador.', true); }
+  });
 
   // ---------- Tela ----------
   // Mês em exibição, "AAAA-MM". Começa no mês atual.
@@ -497,19 +603,20 @@
     return `${MESES[n - 1]} de ${a}`;
   };
   function moverMes(delta) {
-    const [a, n] = mes.split('-').map(Number);
-    const d = new Date(a, n - 1 + delta, 1);
-    mes = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    const proximo = somarMeses(mes, delta);
+    if (!mesValido(proximo)) return anunciar('Você chegou ao limite de datas: janeiro de 1900 a dezembro de 9999.');
+    mes = proximo;
+    confirmando = null; confirmandoConta = null;
   }
   const itensDoMes = (m = mes) => itens.filter((i) => String(i.data).slice(0, 7) === m);
   // Lançamentos antigos não têm categoria
-  const categoriaDe = (i) => (i.categoria && String(i.categoria).trim()) || 'Sem categoria';
+  const categoriaDe = (i) => (i.categoria && String(i.categoria).trim().replace(/\s+/g, ' ')) || 'Sem categoria';
+  const chaveCategoria = (nome) => nome.normalize('NFC').toLocaleLowerCase('pt-BR');
 
   function totais(lista = itensDoMes()) {
     let entradas = 0, saidas = 0;
-    lista.forEach((i) => { if (i.tipo === 'entrada') entradas += i.valor; else saidas += i.valor; });
-    entradas = Math.round(entradas * 100) / 100;
-    saidas = Math.round(saidas * 100) / 100;
+    lista.forEach((i) => { if (i.tipo === 'entrada') entradas += Math.round(i.valor * 100); else saidas += Math.round(i.valor * 100); });
+    entradas /= 100; saidas /= 100;
     return { entradas, saidas, saldo: Math.round((entradas - saidas) * 100) / 100 };
   }
 
@@ -520,16 +627,20 @@
     $('titulo-saldo').textContent = `Saldo de ${nomeMes()}`;
     $('titulo-lista').textContent = `Lançamentos de ${nomeMes()}`;
     $('mes-atual').hidden = mes === hoje().slice(0, 7);
-    if ($('resumo-texto').dataset.mes !== mes) $('resumo-texto').textContent = '';
+    if (!carregado || $('resumo-texto').dataset.mes !== mes) $('resumo-texto').textContent = '';
+    else if ($('resumo-texto').textContent) $('resumo-texto').textContent = fraseResumo();
     desenharContas();
     if (carregado) avisarAoAbrir();
+    atualizarBloqueio();
     // Sugestões de categoria: as já usadas
-    const usadas = [...new Set(itens.map((i) => i.categoria && String(i.categoria).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const categoriasUnicas = new Map();
+    itens.filter((i) => i.categoria).forEach((i) => { const c = categoriaDe(i); if (!categoriasUnicas.has(chaveCategoria(c))) categoriasUnicas.set(chaveCategoria(c), c); });
+    const usadas = [...categoriasUnicas.values()].sort((a,b) => a.localeCompare(b, 'pt-BR'));
     $('categorias').replaceChildren(...usadas.map((c) => { const o = document.createElement('option'); o.value = c; return o; }));
-    $('saldo-valor').textContent = dinheiro(t.saldo);
-    $('total-entradas').textContent = dinheiro(t.entradas);
-    $('total-saidas').textContent = dinheiro(t.saidas);
-    $('saldo-estado').textContent = !doMes.length ? 'Nenhum lançamento neste mês.'
+    $('saldo-valor').textContent = carregado ? dinheiro(t.saldo) : 'Indisponível';
+    $('total-entradas').textContent = carregado ? dinheiro(t.entradas) : '—';
+    $('total-saidas').textContent = carregado ? dinheiro(t.saidas) : '—';
+    $('saldo-estado').textContent = !carregado ? 'Aguarde o carregamento dos dados.' : !doMes.length ? 'Nenhum lançamento neste mês.'
       : t.saldo > 0 ? 'Positivo: sobrou dinheiro.'
       : t.saldo < 0 ? 'Negativo: saiu mais do que entrou.'
       : 'Zerado.';
@@ -538,7 +649,7 @@
     const lista = $('lista');
     lista.textContent = '';
     if (!carregado) {
-      lista.innerHTML = '<li class="vazio">Carregando seus lançamentos…</li>';
+      const aviso = document.createElement('li'); aviso.className = 'vazio'; aviso.textContent = problemaDados || 'Carregando seus lançamentos…'; lista.append(aviso);
       return;
     }
     if (!doMes.length) {
@@ -547,6 +658,7 @@
     }
     const ordem = [...doMes].sort((a, b) => String(b.data).localeCompare(String(a.data)) || (b.criado || 0) - (a.criado || 0));
     ordem.forEach((i) => lista.appendChild(linha(i)));
+    atualizarBloqueio();
   }
 
   function linha(i) {
@@ -619,6 +731,7 @@
     const item = itens.find((x) => x.id === id);
     if (!item) return;
     const acao = b.dataset.acao;
+    if (gravando || !carregado) return;
     if (acao === 'excluir') {
       confirmando = id;
       desenhar();
@@ -633,12 +746,8 @@
       const vizinho = li.nextElementSibling || li.previousElementSibling;
       const idVizinho = vizinho && vizinho.dataset.id;
       confirmando = null;
-      try {
-        await remover(id);
-      } catch (err) {
-        desenhar();
-        return anunciar('Não foi possível excluir agora. Tente de novo.', true);
-      }
+      if (!await executarGravacao(() => remover(id))) { desenhar(); focar(id, 'excluir'); return; }
+      desenhar();
       setTimeout(() => {
         if (idVizinho && document.querySelector(`.item[data-id="${CSS.escape(idVizinho)}"]`)) focar(idVizinho, 'excluir');
         else $('titulo-lista').focus();
@@ -656,20 +765,29 @@
     $(campo).removeAttribute('aria-invalid');
     $('erro-' + campo).textContent = '';
   }
-  ['descricao', 'valor', 'data'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+  ['descricao','valor','data','categoria'].forEach((c) => $(c).addEventListener('input', () => { limparErro(c); $('duplicado-aviso').hidden = true; $('confirmar-duplicado').checked = false; }));
+  document.querySelectorAll('input[name="tipo"]').forEach((c) => c.addEventListener('change', () => { $('duplicado-aviso').hidden = true; $('confirmar-duplicado').checked = false; }));
   $('data').value = hoje();
 
   $('novo').addEventListener('submit', async (e) => {
     e.preventDefault();
-    limparErro('descricao'); limparErro('valor'); limparErro('data');
-    const descricao = $('descricao').value.trim();
+    if (gravando) return;
+    ['descricao','valor','data','categoria'].forEach(limparErro);
+    const descricao = normalizarTexto($('descricao').value);
     const valor = lerValor($('valor').value);
-    const categoria = $('categoria').value.trim();
+    // Reaproveita a grafia de uma categoria já usada ("mercado" vira "Mercado")
+    let categoria = $('categoria').value.trim().replace(/\s+/g, ' ');
+    const existente = itens.find((i) => i.categoria && chaveCategoria(categoriaDe(i)) === chaveCategoria(categoria));
+    if (categoria && existente) categoria = categoriaDe(existente);
     const data = $('data').value;
-    const tipo = document.querySelector('input[name="tipo"]:checked').value;
+    const selecionado = document.querySelector('input[name="tipo"]:checked');
+    if (!selecionado || !['entrada','saida'].includes(selecionado.value)) return anunciar('Escolha Entrada ou Saída antes de adicionar.', true);
+    const tipo = selecionado.value;
     if (!descricao) erro('descricao', 'escreva o que foi, por exemplo: Mercado.');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) erro('data', 'escolha uma data válida.');
-    if (valor === null) erro('valor', 'digite o valor em números, por exemplo: 45,90.');
+    if (descricao.length > 80) erro('descricao', 'use no máximo 80 caracteres.');
+    if (categoria.length > 40) erro('categoria', 'use no máximo 40 caracteres.');
+    if (!dataValida(data)) erro('data', 'escolha uma data real entre 1900 e 9999.');
+    if (valor === null) erro('valor', 'use até 999.999.999,99, com no máximo duas casas decimais; por exemplo: 45,90.');
     else if (valor <= 0) erro('valor', 'o valor precisa ser maior que zero.');
     const invalido = document.querySelector('#novo [aria-invalid="true"]');
     if (invalido) {
@@ -679,16 +797,19 @@
     }
     if (!carregado) return anunciar('Aguarde, seus lançamentos ainda estão carregando.', true);
 
+    if (itens.some((i) => i.tipo === tipo && i.descricao === descricao && i.valor === valor && i.data === data && chaveCategoria(categoriaDe(i)) === chaveCategoria(categoria || 'Sem categoria')) && !$('confirmar-duplicado').checked) {
+      $('duplicado-aviso').hidden = false; $('confirmar-duplicado').focus();
+      return anunciar('Já existe um lançamento igual. Marque a confirmação somente se este for outro lançamento.', true);
+    }
     const item = { id: novoId(), tipo, descricao, valor, data, criado: Date.now() };
     if (categoria) item.categoria = categoria;
     // Se o lançamento é de outro mês, mostra esse mês para ele não "sumir"
     const outroMes = data.slice(0, 7) !== mes;
-    if (outroMes) mes = data.slice(0, 7);
-    try {
-      await adicionar(item);
-    } catch (err) {
-      return anunciar('Não foi possível salvar agora. Tente de novo.', true);
-    }
+    if (!await executarGravacao(() => adicionar(item))) return;
+    if (outroMes) mes = data.slice(0,7);
+    confirmando = null; confirmandoConta = null;
+    desenhar();
+    $('duplicado-aviso').hidden = true; $('confirmar-duplicado').checked = false;
     $('descricao').value = '';
     $('valor').value = '';
     $('categoria').value = '';
@@ -712,14 +833,17 @@
   });
 
   // ---------- Voz ----------
-  const voz = 'speechSynthesis' in window ? window.speechSynthesis : null;
+  const voz = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function' ? window.speechSynthesis : null;
   function falar(frase) {
-    const u = new SpeechSynthesisUtterance(frase);
-    u.lang = 'pt-BR';
-    const pt = voz.getVoices().find((v) => /^pt[-_]BR/i.test(v.lang)) || voz.getVoices().find((v) => /^pt/i.test(v.lang));
-    if (pt) u.voice = pt;
-    voz.cancel();
-    voz.speak(u);
+    try {
+      const u = new SpeechSynthesisUtterance(frase);
+      u.lang = 'pt-BR';
+      u.onerror = (e) => { if (!['canceled','interrupted'].includes(e.error)) anunciar(frase + ' A voz está indisponível; use o texto na tela.', true); };
+      const vozes = voz.getVoices();
+      const pt = vozes.find((v) => /^pt[-_]BR/i.test(v.lang)) || vozes.find((v) => /^pt/i.test(v.lang));
+      if (pt) u.voice = pt;
+      voz.cancel(); voz.speak(u);
+    } catch (e) { anunciar(frase + ' A voz está indisponível; use o texto na tela.', true); }
   }
   const saldoFalado = (v) => `${v < 0 ? 'negativo, menos ' : ''}${valorFalado(v)}`;
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
@@ -736,11 +860,15 @@
     if (!doMes.length) return `Resumo de ${nomeMes()}: nenhum lançamento neste mês.`;
     const t = totais(doMes);
     const porCategoria = new Map();
+    // "Mercado" e "mercado" contam como a mesma categoria; vale a primeira grafia
+    const rotulos = new Map();
     doMes.filter((i) => i.tipo !== 'entrada').forEach((i) => {
-      const c = categoriaDe(i);
+      const nome = categoriaDe(i);
+      const c = chaveCategoria(nome);
+      if (!rotulos.has(c)) rotulos.set(c, nome);
       porCategoria.set(c, Math.round(((porCategoria.get(c) || 0) + i.valor) * 100) / 100);
     });
-    const maiores = [...porCategoria].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const maiores = [...porCategoria].map(([c, v]) => [rotulos.get(c), v]).sort((a, b) => b[1] - a[1]).slice(0, 3);
     let f = `Resumo de ${nomeMes()}. Entradas: ${valorFalado(t.entradas)}. Saídas: ${valorFalado(t.saidas)}. Saldo: ${saldoFalado(t.saldo)}.`;
     f += maiores.length
       ? ` ${maiores.length === 1 ? 'Maior gasto' : `${maiores.length} maiores gastos`} por categoria: ${maiores.map(([c, v], k) => `${k + 1}º, ${c}, ${valorFalado(v)}`).join('; ')}.`
@@ -772,45 +900,63 @@
   const diaDoVencimento = (c, m) => Math.min(c.dia, diasNoMes(m));
   const foiPaga = (c, m) => !!(c.pagas && c.pagas[m]);
   const somarMeses = (m, d) => { const [a, n] = m.split('-').map(Number); const x = new Date(a, n - 1 + d, 1); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}`; };
-  const diasEntre = (isoA, isoB) => Math.round((Date.parse(isoB + 'T12:00:00') - Date.parse(isoA + 'T12:00:00')) / 86400000);
+  const diasEntre = (isoA, isoB) => { const utc = (iso) => { const [a,m,d] = iso.split('-').map(Number); return Date.UTC(a,m-1,d); }; return Math.round((utc(isoB)-utc(isoA))/86400000); };
   const JANELA_DIAS = 7;
   // Primeiro mês em que a conta existe (o do cadastro)
   function mesInicial(c) {
+    if (c.primeiroMes && mesValido(c.primeiroMes)) return c.primeiroMes;
     const d = c.criado ? new Date(c.criado) : null;
     return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}` : '0000-00';
   }
 
   function contasPendentes() {
-    const hojeIso = hoje();
-    const atual = hojeIso.slice(0, 7);
+    const hojeIso = hoje(), atual = hojeIso.slice(0,7);
     const atrasadas = [], proximas = [];
-    contas.forEach((c) => {
-      [somarMeses(atual, -1), atual, somarMeses(atual, 1)].forEach((m) => {
-        if (m < mesInicial(c) && m !== atual) return;
-        if (foiPaga(c, m)) return;
-        const iso = `${m}-${pad(diaDoVencimento(c, m))}`;
-        const dias = diasEntre(hojeIso, iso);
-        if (dias < 0 && m <= atual) atrasadas.push({ c, iso, dias });
-        else if (dias >= 0 && dias <= JANELA_DIAS) proximas.push({ c, iso, dias });
+    let totalAtrasadas = 0, totalProximas = 0;
+    const numeroMes = m => +m.slice(0,4) * 12 + +m.slice(5,7) - 1;
+    const porData = (a,b) => a.iso.localeCompare(b.iso) || a.c.id.localeCompare(b.c.id);
+    const guardar = (lista, item) => { lista.push(item); lista.sort(porData); if (lista.length > 3) lista.pop(); };
+    contas.forEach(c => {
+      const inicio = mesInicial(c);
+      if (inicio > atual) return;
+      const vencimentoAtual = `${atual}-${pad(diaDoVencimento(c,atual))}`;
+      const ultimoAtrasado = vencimentoAtual < hojeIso ? atual : somarMeses(atual,-1);
+      if (ultimoAtrasado >= inicio) {
+        const numero = numeroMes(ultimoAtrasado) - numeroMes(inicio) + 1;
+        const pagas = Object.keys(c.pagas || {}).filter(m => c.pagas[m] && m >= inicio && m <= ultimoAtrasado).length;
+        totalAtrasadas += numero - pagas;
+        // Conta todos os atrasos, mas guarda só os três primeiros para um aviso curto.
+        let encontrados = 0;
+        for (let k=0; k < numero && encontrados < 3; k++) {
+          const m = somarMeses(inicio,k);
+          if (foiPaga(c,m)) continue;
+          const iso = `${m}-${pad(diaDoVencimento(c,m))}`;
+          guardar(atrasadas,{c,iso,dias:diasEntre(hojeIso,iso)}); encontrados++;
+        }
+      }
+      [atual,somarMeses(atual,1)].filter(mesValido).forEach(m => {
+        if (m < inicio || foiPaga(c,m)) return;
+        const iso = `${m}-${pad(diaDoVencimento(c,m))}`, dias = diasEntre(hojeIso,iso);
+        if (dias >= 0 && dias <= JANELA_DIAS) { totalProximas++; guardar(proximas,{c,iso,dias}); }
       });
     });
-    const porData = (a, b) => a.iso.localeCompare(b.iso);
-    return { atrasadas: atrasadas.sort(porData), proximas: proximas.sort(porData) };
+    return {atrasadas, proximas, totalAtrasadas, totalProximas};
   }
   const quando = (dias) => dias === 0 ? 'vence hoje' : dias === 1 ? 'vence amanhã' : `vence em ${dias} dias`;
 
   function fraseAviso() {
-    const { atrasadas, proximas } = contasPendentes();
+    const { atrasadas, proximas, totalAtrasadas, totalProximas } = contasPendentes();
     if (!atrasadas.length && !proximas.length) return '';
     const partes = [];
     if (atrasadas.length) {
-      partes.push(`${plural(atrasadas.length, 'conta atrasada', 'contas atrasadas')}: ` +
-        atrasadas.map(({ c, iso }) => `${c.descricao}, ${valorFalado(c.valor)}, venceu em ${dataLonga(iso)}`).join('; ') + '.');
+      partes.push(`${plural(totalAtrasadas, 'vencimento atrasado', 'vencimentos atrasados')}: ` +
+        atrasadas.slice(0,3).map(({ c, iso }) => `${c.descricao}, ${valorFalado(c.valor)}, venceu em ${dataLonga(iso)}`).join('; ') + '.');
     }
     if (proximas.length) {
-      partes.push(`${plural(proximas.length, 'conta próxima', 'contas próximas')}: ` +
-        proximas.map(({ c, dias }) => `${c.descricao}, ${valorFalado(c.valor)}, ${quando(dias)}`).join('; ') + '.');
+      partes.push(`${plural(totalProximas, 'vencimento próximo', 'vencimentos próximos')}: ` +
+        proximas.slice(0,3).map(({ c, dias }) => `${c.descricao}, ${valorFalado(c.valor)}, ${quando(dias)}`).join('; ') + '.');
     }
+    if (totalAtrasadas > 3 || totalProximas > 3) partes.push('Mostrando no aviso até três de cada grupo. Consulte os meses em Contas a vencer para as demais ocorrências.');
     return 'Atenção. ' + partes.join(' ');
   }
 
@@ -917,15 +1063,13 @@
     const conta = contas.find((x) => x.id === id);
     if (!conta) return;
     const acao = b.dataset.acao;
+    if (gravando || !carregado) return;
     if (acao === 'pagar') {
       const pagas = { ...(conta.pagas || {}) };
       const agora = !pagas[mes];
       if (agora) pagas[mes] = true; else delete pagas[mes];
-      try {
-        await salvarConta({ ...conta, pagas });
-      } catch (err) {
-        return anunciar('Não foi possível salvar agora. Tente de novo.', true);
-      }
+      if (!await executarGravacao(() => salvarConta({ ...conta, pagas }))) { focarConta(id,'pagar'); return; }
+      desenhar();
       setTimeout(() => focarConta(id, 'pagar'), 50);
       anunciar(agora ? `${conta.descricao} marcada como paga em ${nomeMes()}.` : `Pagamento de ${conta.descricao} desfeito em ${nomeMes()}.`);
     } else if (acao === 'excluir') {
@@ -942,12 +1086,8 @@
       const vizinho = li.nextElementSibling || li.previousElementSibling;
       const idVizinho = vizinho && vizinho.dataset.id;
       confirmandoConta = null;
-      try {
-        await removerConta(id);
-      } catch (err) {
-        desenhar();
-        return anunciar('Não foi possível excluir agora. Tente de novo.', true);
-      }
+      if (!await executarGravacao(() => removerConta(id))) { desenhar(); focarConta(id,'excluir'); return; }
+      desenhar();
       setTimeout(() => {
         if (idVizinho && document.querySelector(`#lista-contas .item[data-id="${CSS.escape(idVizinho)}"]`)) focarConta(idVizinho, 'excluir');
         else $('titulo-contas').focus();
@@ -956,17 +1096,19 @@
     }
   });
 
-  ['c-descricao', 'c-valor', 'c-dia'].forEach((c) => $(c).addEventListener('input', () => limparErro(c)));
+  ['c-descricao','c-valor','c-dia'].forEach((c) => $(c).addEventListener('input', () => { limparErro(c); $('c-duplicado-aviso').hidden = true; $('c-confirmar-duplicado').checked = false; }));
   $('nova-conta').addEventListener('submit', async (e) => {
     e.preventDefault();
-    ['c-descricao', 'c-valor', 'c-dia'].forEach(limparErro);
-    const descricao = $('c-descricao').value.trim();
+    if (gravando) return;
+    ['c-descricao','c-valor','c-dia'].forEach(limparErro);
+    const descricao = normalizarTexto($('c-descricao').value);
     const valor = lerValor($('c-valor').value);
     const diaTexto = $('c-dia').value.trim();
     const dia = /^\d{1,2}$/.test(diaTexto) ? Number(diaTexto) : NaN;
     if (!descricao) erro('c-descricao', 'escreva o nome da conta, por exemplo: Aluguel.');
-    if (valor === null) erro('c-valor', 'digite o valor em números, por exemplo: 650,90.');
+    if (valor === null) erro('c-valor', 'use até 999.999.999,99, com no máximo duas casas decimais; por exemplo: 650,90.');
     else if (valor <= 0) erro('c-valor', 'o valor precisa ser maior que zero.');
+    if (descricao.length > 80) erro('c-descricao','use no máximo 80 caracteres.');
     if (!(dia >= 1 && dia <= 31)) erro('c-dia', 'digite um dia de 1 a 31, por exemplo: 10.');
     const invalido = document.querySelector('#nova-conta [aria-invalid="true"]');
     if (invalido) {
@@ -975,21 +1117,24 @@
       return;
     }
     if (!carregado) return anunciar('Aguarde, seus dados ainda estão carregando.', true);
-    const id = novoId();
-    // O UID nunca muda: é ele que faz a agenda atualizar o evento em vez de duplicar
-    const uid = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : id + Math.random().toString(16).slice(2)) + '@controle-pessoal';
-    try {
-      await salvarConta({ id, tipo: 'conta', descricao, valor, dia, uid, pagas: {}, criado: Date.now() });
-    } catch (err) {
-      return anunciar('Não foi possível salvar agora. Tente de novo.', true);
+    if (contas.some((c) => c.descricao === descricao && c.valor === valor && c.dia === dia) && !$('c-confirmar-duplicado').checked) {
+      $('c-duplicado-aviso').hidden = false; $('c-confirmar-duplicado').focus();
+      return anunciar('Já existe uma conta igual. Confirme somente se esta for outra conta.',true);
     }
+    const id = novoId();
+    // UID estável; a reimportação depende do comportamento da agenda.
+    const uid = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : id + Math.random().toString(16).slice(2)) + '@controle-pessoal';
+    if (!await executarGravacao(() => salvarConta({ id, tipo:'conta', descricao, valor, dia, uid, pagas:{}, criado:Date.now(), primeiroMes:hoje().slice(0,7), dataCadastro:hoje() }))) return;
+    mes = hoje().slice(0,7); confirmandoConta = null;
+    desenhar();
+    $('c-duplicado-aviso').hidden = true; $('c-confirmar-duplicado').checked = false;
     ['c-descricao', 'c-valor', 'c-dia'].forEach((c) => { $(c).value = ''; });
     $('c-descricao').focus();
     anunciar(`Conta adicionada: ${descricao}, ${dinheiro(valor)}, vence todo dia ${dia}.`);
   });
 
   // ---------- Exportar para a agenda (.ics, RFC 5545) ----------
-  const icsTexto = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const icsTexto = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
   // Linhas de até 75 bytes, continuadas com espaço; sem cortar no meio de um caractere
   function icsDobrar(linha) {
     const enc = new TextEncoder();
@@ -1007,17 +1152,19 @@
   const icsAgora = () => new Date().toISOString().replace(/[-:]|\.\d{3}/g, '');
 
   function gerarICS() {
+    validarLista(contas,true);
     const agora = icsAgora();
     const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Controle Pessoal//Contas a vencer//PT-BR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Contas a vencer'];
     contas.forEach((c) => {
       // Primeiro vencimento: o do mês do cadastro, ou o do mês seguinte se o dia já tinha passado.
       // Depende só dos dados da conta, então não muda de uma exportação para a outra.
       const cad = new Date(c.criado || Date.now());
-      const iso0 = `${cad.getFullYear()}-${pad(cad.getMonth() + 1)}-${pad(cad.getDate())}`;
+      const iso0 = c.dataCadastro || `${cad.getFullYear()}-${pad(cad.getMonth() + 1)}-${pad(cad.getDate())}`;
       let m = iso0.slice(0, 7);
       if (`${m}-${pad(diaDoVencimento(c, m))}` < iso0) m = somarMeses(m, 1);
       const inicio = `${m}-${pad(diaDoVencimento(c, m))}`;
-      const fim = new Date(Date.parse(inicio + 'T12:00:00') + 86400000);
+      const [anoInicio,mesInicio,diaInicio] = inicio.split('-').map(Number);
+      const fim = new Date(anoInicio,mesInicio-1,diaInicio,12); fim.setDate(fim.getDate()+1);
       const fimIso = `${fim.getFullYear()}-${pad(fim.getMonth() + 1)}-${pad(fim.getDate())}`;
       // Dias 29 a 31: pega o último dia existente do mês, até o dia escolhido
       const regra = c.dia >= 29
@@ -1046,18 +1193,17 @@
     return L.map(icsDobrar).join('\r\n') + '\r\n';
   }
 
+  function baixarArquivo(texto,nome,tipo) {
+    const url = URL.createObjectURL(new Blob([texto],{type:tipo}));
+    const a = document.createElement('a'); a.href = url; a.download = nome;
+    try { document.body.appendChild(a); a.click(); }
+    finally { a.remove(); setTimeout(() => URL.revokeObjectURL(url),1000); }
+  }
   $('exportar').addEventListener('click', () => {
+    if (!carregado || gravando) return anunciar('Aguarde o carregamento e a gravação dos dados antes de exportar.',true);
     if (!contas.length) return anunciar('Cadastre uma conta antes de exportar.', true);
     try {
-      const blob = new Blob([gerarICS()], { type: 'text/calendar;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'contas-a-vencer.ics';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      baixarArquivo(gerarICS(), 'contas-a-vencer.ics','text/calendar;charset=utf-8');
       anunciar(`Arquivo contas-a-vencer.ics gerado com ${plural(contas.length, 'conta', 'contas')}. Abra o arquivo para importar na sua agenda.`);
     } catch (err) {
       anunciar('Não foi possível gerar o arquivo agora.', true);

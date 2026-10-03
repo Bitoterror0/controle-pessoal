@@ -24,10 +24,16 @@ Os dados ficam salvos no próprio navegador (localStorage), só neste aparelho.
 
 ## Categorias, meses, resumo falado e contas
 
-- **Categoria e data** no formulário (opcionais). Lançamentos antigos sem categoria aparecem como "Sem categoria".
+- **Categoria opcional e data obrigatória** no formulário (data preenchida com hoje). Lançamentos antigos sem categoria aparecem como "Sem categoria".
 - **Mês**: botões "Mês anterior", "Próximo mês" e "Ir para o mês atual". Saldo, totais e lista mostram o mês escolhido.
 - **Resumo do mês**: o botão "Ouvir o resumo do mês" fala entradas, saídas, saldo e os 3 maiores gastos por categoria (o texto também fica na tela). Ao abrir, um aviso opcional (caixa "Avisar sobre contas ao abrir o app") cobre contas atrasadas e as que vencem em até 7 dias.
-- **Contas a vencer**: descrição, valor e dia do vencimento, todo mês. "Marcar como paga" vale para o mês em exibição. "Exportar contas para a agenda" gera `contas-a-vencer.ics`; cada conta tem um UID fixo, para agendas que o reconhecem atualizarem o evento em vez de duplicar. O arquivo é uma cópia: excluir ou pagar uma conta no app não altera a agenda.
+- **Contas a vencer**: descrição, valor e dia do vencimento, todo mês. "Marcar como paga" vale para o mês em exibição e não registra saída no saldo. O aviso conta todos os vencimentos não pagos desde o cadastro. "Exportar contas para a agenda" gera `contas-a-vencer.ics`; o UID é fixo, mas algumas agendas podem duplicar ao reimportar. O arquivo é uma cópia: excluir ou pagar uma conta no app não altera a agenda.
+
+## Proteções e exceções
+
+Valores e datas são validados antes de salvar. Duplicados intencionais precisam de confirmação. Falhas de armazenamento preservam campos; dados corrompidos e alterações em outra aba bloqueiam gravações para proteger o histórico.
+
+A matriz [EXCECOES.md](EXCECOES.md) descreve as ações permitidas, bloqueios, recuperação, testes executados e limites. Os testes podem ser executados com `node testes-excecoes.cjs`. A acessibilidade com leitores de tela e a importação em calendários reais ainda precisam de verificação manual.
 
 ## Próximos passos
 
