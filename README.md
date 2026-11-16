@@ -2,6 +2,15 @@
 
 Controle financeiro pessoal bem simples, feito para funcionar com leitor de tela, teclado e baixa visão.
 
+## O que há neste repositório
+
+| Pasta | Projeto | Onde os dados ficam |
+|---|---|---|
+| `/` (raiz) | **Controle Pessoal**: entradas, saídas, contas a vencer | No navegador de quem usa (localStorage). Nada é enviado para servidor. |
+| [`fichas-avaliacao-2026/`](fichas-avaliacao-2026/) | **Fichas de Avaliação 2026**: cópia do artefato do Claude | Na conta do Claude de quem usa. Este repositório guarda só o código, sem ficha de aluno. |
+
+**Segurança:** este repositório é público. Não coloque aqui fichas preenchidas, nomes de alunos, cópias de recuperação (`controle-pessoal-recuperacao.json`) nem arquivos `.ics` exportados.
+
 ## Como usar
 
 Abra o arquivo `index.html` no navegador. Não precisa instalar nada.
