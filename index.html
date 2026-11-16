@@ -483,7 +483,10 @@
     anunciar(msg, true);
   }
   function atualizarBloqueio() {
-    document.querySelectorAll('#novo input, #novo button, #nova-conta input, #nova-conta button, #lista button, #lista-contas button').forEach((b) => { b.disabled = gravando || !carregado; });
+    // Durante a gravação, o controle com foco fica habilitado: desabilitá-lo tira o foco no computador
+    // e o leitor de tela (NVDA, JAWS) perde a posição. Os cliques repetidos já são barrados por "gravando".
+    const comFoco = document.activeElement;
+    document.querySelectorAll('#novo input, #novo button, #nova-conta input, #nova-conta button, #lista button, #lista-contas button').forEach((b) => { b.disabled = !carregado || (gravando && b !== comFoco); });
     ['mes-anterior','mes-proximo','mes-atual'].forEach((id) => { $(id).disabled = gravando; });
     $('mes-anterior').disabled ||= mes === '1900-01';
     $('mes-proximo').disabled ||= mes === '9999-12';
@@ -834,17 +837,31 @@
 
   // ---------- Voz ----------
   const voz = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function' ? window.speechSynthesis : null;
+  // No computador a síntese pode falhar em silêncio: sem voz instalada, ou com a fala descartada logo
+  // depois de cancel(). Se a fala não começar, o texto vai para a região de anúncio e o leitor de tela lê.
+  let falaAtual = null, falaTimer;
   function falar(frase) {
+    clearTimeout(falaTimer);
+    const reserva = () => { if (falaAtual === u) { falaAtual = null; anunciar(frase); } };
+    let u = null;
     try {
-      const u = new SpeechSynthesisUtterance(frase);
+      u = new SpeechSynthesisUtterance(frase);
+      falaAtual = u;
+      let comecou = false;
       u.lang = 'pt-BR';
-      u.onerror = (e) => { if (!['canceled','interrupted'].includes(e.error)) anunciar(frase + ' A voz está indisponível; use o texto na tela.', true); };
+      u.onstart = () => { comecou = true; clearTimeout(falaTimer); };
+      u.onerror = (e) => { if (!comecou || !['canceled','interrupted'].includes(e.error)) reserva(); };
       const vozes = voz.getVoices();
       const pt = vozes.find((v) => /^pt[-_]BR/i.test(v.lang)) || vozes.find((v) => /^pt/i.test(v.lang));
       if (pt) u.voice = pt;
-      voz.cancel(); voz.speak(u);
-    } catch (e) { anunciar(frase + ' A voz está indisponível; use o texto na tela.', true); }
+      voz.cancel();
+      falaTimer = setTimeout(() => {
+        try { voz.speak(u); } catch (e) { return reserva(); }
+        falaTimer = setTimeout(() => { if (!comecou && falaAtual === u) { try { voz.cancel(); } catch (e) {} reserva(); } }, 2500);
+      }, 60);
+    } catch (e) { falaAtual = u; reserva(); }
   }
+  function calar() { clearTimeout(falaTimer); falaAtual = null; voz.cancel(); }
   const saldoFalado = (v) => `${v < 0 ? 'negativo, menos ' : ''}${valorFalado(v)}`;
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
 
@@ -878,7 +895,7 @@
 
   // O resumo também fica escrito na tela. Sem síntese de voz, o leitor de tela lê pelo aviso.
   $('resumir').addEventListener('click', () => {
-    if (voz && voz.speaking) { voz.cancel(); return anunciar('Fala interrompida.'); }
+    if (voz && voz.speaking) { calar(); return anunciar('Fala interrompida.'); }
     const f = fraseResumo();
     $('resumo-texto').textContent = f;
     $('resumo-texto').dataset.mes = mes;
@@ -888,7 +905,7 @@
   if (voz) {
     $('ouvir').hidden = false;
     $('ouvir').addEventListener('click', () => {
-      if (voz.speaking) { voz.cancel(); return; }
+      if (voz.speaking) { calar(); return; }
       falar(fraseSaldo());
     });
   }
@@ -972,13 +989,17 @@
     // Navegadores só deixam falar sem clique se a pessoa já interagiu com a página.
     // Quando fala, não anuncia também no aria-live, para o leitor de tela não repetir.
     if (voz && navigator.userActivation && navigator.userActivation.hasBeenActive) falar(f);
-    else anunciar(f);
+    else {
+      // Leitores de tela de computador ignoram anúncios feitos enquanto a página ainda carrega.
+      const dizer = () => setTimeout(() => { if (prefs.avisoAbrir !== false) anunciar(f); }, 1500);
+      if (document.readyState === 'complete') dizer(); else window.addEventListener('load', dizer, { once: true });
+    }
   }
   $('avisar-ao-abrir').addEventListener('change', (e) => {
     prefs.avisoAbrir = e.target.checked;
     salvarPrefs();
     anunciar(prefs.avisoAbrir ? 'Aviso de contas ao abrir: ligado.' : 'Aviso de contas ao abrir: desligado.');
-    if (!prefs.avisoAbrir) { $('aviso-abrir').hidden = true; if (voz) voz.cancel(); }
+    if (!prefs.avisoAbrir) { $('aviso-abrir').hidden = true; if (voz) calar(); }
   });
 
   // ---------- Contas a vencer ----------
