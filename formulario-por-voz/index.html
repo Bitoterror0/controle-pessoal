@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Envie o modelo de formulário em Word, responda falando ou escrevendo e receba o documento preenchido no mesmo formato.">
+<title>Formulário por Voz</title>
+<style>
+  /* Uma coluna, na ordem do trabalho: enviar o modelo, responder, baixar */
+  :root {
+    --fundo: #f6f5f0; --papel: #ffffff; --tinta: #14161a; --tinta-2: #3d434c; --linha: #5c6470;
+    --acao: #0b3d91; --sobre-acao: #ffffff; --foco: #c2410c; --erro: #a11212; --ok: #0c5a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fundo: #0c0d10; --papel: #16181d; --tinta: #f6f4ee; --tinta-2: #d3d6db; --linha: #9aa3ad;
+      --acao: #ffd84a; --sobre-acao: #0c0d10; --foco: #7fd4ff; --erro: #ffa3a3; --ok: #7be3a0; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--fundo); color: var(--tinta); font: 1.125rem/1.55 Verdana, Tahoma, 'Segoe UI', Arial, sans-serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 1.25rem 16px 3rem; display: grid; gap: 1.25rem; }
+  main * { min-width: 0; }
+  h1, h2, p { margin: 0; overflow-wrap: break-word; }
+  h1 { font-size: 1.8rem; line-height: 1.2; }
+  h2 { font-size: 1.3rem; }
+  .cartao { background: var(--papel); border: 2px solid var(--linha); border-radius: 12px; padding: 1rem 1.1rem; display: grid; gap: 0.9rem; }
+  .suave { color: var(--tinta-2); font-size: 0.95rem; }
+  :focus-visible { outline: 4px solid var(--foco); outline-offset: 3px; border-radius: 6px; }
+  .btn { min-height: 3rem; padding: 0.5rem 1rem; font: inherit; font-weight: 700; color: var(--tinta); background: var(--papel);
+    border: 2px solid var(--tinta); border-radius: 10px; cursor: pointer; overflow-wrap: anywhere; }
+  .btn[aria-pressed="true"] { background: var(--tinta); color: var(--fundo); }
+  .btn-principal { background: var(--acao); color: var(--sobre-acao); border-color: var(--acao); width: 100%; font-size: 1.15rem; }
+  label, legend { font-weight: 700; overflow-wrap: anywhere; }
+  input[type="file"], input[type="text"], textarea { width: 100%; min-height: 3rem; padding: 0.5rem 0.75rem; font: inherit;
+    color: var(--tinta); background: var(--fundo); border: 2px solid var(--tinta); border-radius: 8px; }
+  textarea { min-height: 5rem; resize: vertical; }
+  fieldset { border: 2px solid var(--linha); border-radius: 10px; margin: 0; padding: 0.7rem 0.9rem; display: grid; gap: 0.5rem; }
+  .campo { display: grid; gap: 0.4rem; }
+  .linha { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: start; }
+  .linha > textarea { flex: 1 1 14rem; }
+  .opcao { display: flex; align-items: center; gap: 0.7rem; min-height: 2.75rem; font-weight: 400; cursor: pointer; }
+  .opcao input { width: 1.4rem; height: 1.4rem; margin: 0; flex-shrink: 0; accent-color: var(--acao); }
+  .complemento { margin-left: 2.1rem; display: grid; gap: 0.3rem; }
+  .erro { color: var(--erro); font-weight: 700; border-left: 5px solid var(--erro); padding-left: 0.6rem; }
+  .ok { color: var(--ok); font-weight: 700; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Formulário por Voz</h1>
+    <p>Envie o modelo em Word, responda falando ou escrevendo e baixe o documento preenchido no mesmo formato.</p>
+  </header>
+
+  <section class="cartao" aria-labelledby="t-enviar">
+    <h2 id="t-enviar">1. Enviar o modelo</h2>
+    <div class="campo">
+      <label for="arquivo">Arquivo do formulário (Word, .docx)</label>
+      <input type="file" id="arquivo" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-describedby="dica-arquivo">
+      <p class="suave" id="dica-arquivo">O arquivo é lido só neste aparelho. Nada é enviado para a internet.</p>
+    </div>
+    <p id="estado" role="status"></p>
+  </section>
+
+  <form class="cartao" id="formulario" aria-labelledby="t-responder" hidden novalidate>
+    <h2 id="t-responder" tabindex="-1">2. Responder</h2>
+    <p class="suave" id="dica-ditar" hidden>O botão “Ditar” escreve o que você falar. O ditado usa o serviço de voz do seu navegador, que pode enviar o áudio para a internet.</p>
+    <div id="campos" class="campo"></div>
+    <h2>3. Baixar</h2>
+    <button type="submit" class="btn btn-principal">Gerar documento preenchido</button>
+  </form>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="detector.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const TIPO_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let zip = null, xml = '', campos = [], nome = 'formulario';
+
+  function avisar(msg, classe = '') {
+    const el = $('estado');
+    el.className = classe;
+    el.textContent = '';
+    setTimeout(() => { el.textContent = msg; }, 80);
+  }
+  const criar = (tag, props = {}, ...filhos) => { const e = Object.assign(document.createElement(tag), props); e.append(...filhos); return e; };
+
+  $('arquivo').addEventListener('change', async (e) => {
+    const arquivo = e.target.files[0];
+    $('formulario').hidden = true;
+    if (!arquivo) return;
+    try {
+      if (typeof JSZip === 'undefined') throw new Error('sem-jszip');
+      zip = await JSZip.loadAsync(arquivo);
+      const doc = zip.file('word/document.xml');
+      if (!doc) throw new Error('nao-docx');
+      xml = await doc.async('string');
+      campos = Detector.detectar(xml);
+      nome = arquivo.name.replace(/\.docx$/i, '');
+    } catch (err) {
+      return avisar(err.message === 'sem-jszip' ? 'Erro: uma parte do site não carregou. Verifique a internet e recarregue a página.'
+        : 'Erro: não consegui ler este arquivo. Envie um documento do Word no formato .docx.', 'erro');
+    }
+    if (!campos.length) return avisar('Não encontrei campos para preencher neste modelo. Hoje eu reconheço rótulos terminados em dois-pontos e caixas de marcar como ( ), [ ] ou ☐.', 'erro');
+    desenhar();
+    const textos = campos.filter((c) => c.tipo === 'texto').length;
+    avisar(`Achei ${campos.length} ${campos.length === 1 ? 'campo' : 'campos'}: ${textos} de escrever e ${campos.length - textos} de marcar. Confira e responda abaixo.`, 'ok');
+    $('formulario').hidden = false;
+    $('t-responder').focus();
+  });
+
+  function desenhar() {
+    const area = $('campos');
+    area.textContent = '';
+    campos.forEach((c) => {
+      if (c.tipo === 'texto') {
+        const caixa = criar('textarea', { id: c.id, rows: 2 });
+        const linha = criar('div', { className: 'linha' }, caixa);
+        if (Reconhecimento) linha.append(botaoDitar(caixa, c.rotulo));
+        area.append(criar('div', { className: 'campo' }, criar('label', { htmlFor: c.id, textContent: c.rotulo }), linha));
+      } else {
+        const grupo = criar('fieldset', {}, criar('legend', { textContent: c.rotulo }));
+        c.opcoes.forEach((o, k) => {
+          const caixa = criar('input', { type: 'checkbox', id: `${c.id}-${k}`, checked: o.marcada });
+          grupo.append(criar('label', { className: 'opcao' }, caixa, ' ' + o.nome));
+          if (o.complemento) {
+            const extra = criar('input', { type: 'text', id: `${c.id}-${k}-x` });
+            const bloco = criar('div', { className: 'complemento', hidden: !o.marcada }, criar('label', { htmlFor: extra.id, textContent: `${o.nome}: qual?` }), extra);
+            caixa.addEventListener('change', () => { bloco.hidden = !caixa.checked; });
+            grupo.append(bloco);
+          }
+        });
+        area.append(grupo);
+      }
+    });
+    $('dica-ditar').hidden = !Reconhecimento;
+  }
+
+  // Ditado: um reconhecimento por vez; apertar de novo para parar
+  let ouvindo = null;
+  function botaoDitar(caixa, rotulo) {
+    const b = criar('button', { type: 'button', className: 'btn', textContent: 'Ditar' });
+    b.setAttribute('aria-pressed', 'false');
+    b.setAttribute('aria-label', `Ditar: ${rotulo}`);
+    b.addEventListener('click', () => {
+      if (ouvindo) { const era = ouvindo; ouvindo.r.stop(); if (era.b === b) return; }
+      const r = new Reconhecimento();
+      r.lang = 'pt-BR'; r.interimResults = false; r.continuous = true;
+      const base = caixa.value ? caixa.value.replace(/\s*$/, ' ') : '';
+      let dito = '';
+      r.onresult = (ev) => {
+        dito = [...ev.results].filter((x) => x.isFinal).map((x) => x[0].transcript.trim()).join(' ');
+        caixa.value = base + dito;
+      };
+      r.onerror = (ev) => { if (ev.error !== 'aborted' && ev.error !== 'no-speech') avisar('Erro: o ditado não funcionou neste navegador. Escreva a resposta no campo.', 'erro'); };
+      r.onend = () => { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Ditar'; if (ouvindo && ouvindo.r === r) ouvindo = null; if (dito) avisar(`Anotado em ${rotulo}: ${dito}`); };
+      try { r.start(); } catch (err) { return avisar('Erro: o ditado não funcionou neste navegador. Escreva a resposta no campo.', 'erro'); }
+      ouvindo = { r, b };
+      b.setAttribute('aria-pressed', 'true'); b.textContent = 'Parar de ditar';
+      avisar('Ouvindo. Fale a resposta e aperte Parar de ditar quando terminar.');
+    });
+    return b;
+  }
+
+  $('formulario').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (ouvindo) ouvindo.r.stop();
+    const respostas = {};
+    campos.forEach((c) => {
+      if (c.tipo === 'texto') respostas[c.id] = $(c.id).value;
+      else {
+        const r = { marcadas: [], complementos: {} };
+        c.opcoes.forEach((o, k) => {
+          if ($(`${c.id}-${k}`).checked) r.marcadas.push(k);
+          if (o.complemento) r.complementos[k] = $(`${c.id}-${k}-x`).value;
+        });
+        respostas[c.id] = r;
+      }
+    });
+    try {
+      zip.file('word/document.xml', Detector.preencher(xml, respostas));
+      const blob = await zip.generateAsync({ type: 'blob', mimeType: TIPO_DOCX, compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = criar('a', { href: url, download: `${nome}-preenchido.docx` });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      avisar(`Documento ${nome}-preenchido.docx gerado. Procure na pasta de downloads.`, 'ok');
+    } catch (err) {
+      avisar('Erro: não foi possível gerar o documento. Suas respostas continuam na tela; tente de novo.', 'erro');
+    }
+  });
+})();
+</script>
+</body>
+</html>

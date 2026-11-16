@@ -8,6 +8,7 @@ Controle financeiro pessoal bem simples, feito para funcionar com leitor de tela
 |---|---|---|
 | `/` (raiz) | **Controle Pessoal**: entradas, saídas, contas a vencer | No navegador de quem usa (localStorage). Nada é enviado para servidor. |
 | [`fichas-avaliacao-2026/`](fichas-avaliacao-2026/) | **Fichas de Avaliação 2026**: cópia do artefato do Claude | Na conta do Claude de quem usa. Este repositório guarda só o código, sem ficha de aluno. |
+| [`formulario-por-voz/`](formulario-por-voz/) | **Formulário por Voz** (protótipo): preenche um modelo Word por voz ou texto | Só no aparelho de quem usa. O arquivo não é enviado para servidor. |
 
 **Segurança:** este repositório é público. Não coloque aqui fichas preenchidas, nomes de alunos, cópias de recuperação (`controle-pessoal-recuperacao.json`) nem arquivos `.ics` exportados.
 
